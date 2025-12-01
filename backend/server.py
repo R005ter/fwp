@@ -136,11 +136,11 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use tv_embedded client - simpler, doesn't require challenge solving or PO tokens
+        # Try android_embedded - sometimes works better than tv_embedded
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=tv_embedded",  # Use TV embedded client (simpler, no challenge solving)
-            "--user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",  # Android TV user agent
+            "--extractor-args", "youtube:player_client=android_embedded",  # Use Android embedded client
+            "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
         
@@ -168,11 +168,11 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use tv_embedded client - simpler, doesn't require challenge solving or PO tokens
+        # Try android_embedded - sometimes works better than tv_embedded
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=tv_embedded",  # Use TV embedded client (simpler, no challenge solving)
-            "--user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",  # Android TV user agent
+            "--extractor-args", "youtube:player_client=android_embedded",  # Use Android embedded client
+            "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
         
