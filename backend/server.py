@@ -82,11 +82,15 @@ if COOKIES_ENV:
     except Exception as e:
         print(f"⚠ Warning: Could not decode YouTube cookies from env: {e}")
 
-# PO Token for YouTube (required for mweb client with GVS requests)
+# PO Token Provider Plugin: yt-dlp-get-pot-rustypipe
+# This plugin automatically provides PO Tokens when needed by yt-dlp
+# No manual PO Token extraction required!
 # See: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
-PO_TOKEN = os.environ.get('YOUTUBE_PO_TOKEN')
-if PO_TOKEN:
-    print(f"✓ YouTube PO Token loaded from environment variable")
+try:
+    import yt_dlp_get_pot_rustypipe
+    print("✓ PO Token Provider plugin (yt-dlp-get-pot-rustypipe) is available")
+except ImportError:
+    print("⚠ Warning: PO Token Provider plugin not installed. Install with: pip install yt-dlp-get-pot-rustypipe")
 
 # Determine if we're in production (Render.com sets PORT env var)
 IS_PRODUCTION = 'RENDER' in os.environ or 'PORT' in os.environ
@@ -147,29 +151,20 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use tv_embedded when cookies are available (supports cookies, NO PO Token required)
-        # Falls back to mweb with PO Token if available, then android without cookies
+        # Use mweb client when cookies are available - PO Token Provider plugin will auto-handle PO Tokens
+        # Falls back to android without cookies
         has_cookies = COOKIES_FILE.exists()
         if has_cookies:
-            if PO_TOKEN:
-                # mweb client with PO Token (if PO Token is provided)
-                player_client = "mweb"
-                user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
-            else:
-                # tv_embedded client - supports cookies, NO PO Token required (recommended)
-                player_client = "tv_embedded"
-                user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            # mweb client - supports cookies, PO Token Provider plugin will automatically provide PO Tokens
+            player_client = "mweb"
+            user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         else:
             # android client doesn't support cookies but may work without them
             player_client = "android"
             user_agent = "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
         
-        # Build extractor args - include PO Token if available and using mweb client
+        # Build extractor args - PO Token Provider plugin will automatically add PO Tokens when needed
         extractor_args = f"youtube:player_client={player_client}"
-        if PO_TOKEN and player_client == "mweb":
-            # PO Token required for mweb client GVS requests
-            extractor_args += f",po_token=mweb.gvs+{PO_TOKEN}"
-            print(f"[{video_id}] Using PO Token with {player_client} client")
         
         info_cmd = [
             "yt-dlp",

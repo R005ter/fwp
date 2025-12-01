@@ -78,7 +78,7 @@ yt-dlp --cookies-from-browser chrome --cookies youtube_cookies.txt https://www.y
 - **Cookies expire:** YouTube cookies typically expire after a few weeks/months. You'll need to re-export and update them periodically.
 - **Keep cookies secure:** Don't commit `youtube_cookies.txt` to Git (it's already in `.gitignore`)
 - **One user's cookies:** The cookies are tied to one YouTube account. If multiple users need to download, you might need a different approach.
-- **PO Token also required:** With the `mweb` client, you also need a PO Token. See `YOUTUBE_PO_TOKEN_SETUP.md` for instructions.
+- **PO Tokens automated:** PO Tokens are now automatically provided by the `yt-dlp-get-pot-rustypipe` plugin. No manual setup needed! See `YOUTUBE_PO_TOKEN_SETUP.md` for details.
 
 ## Troubleshooting
 
