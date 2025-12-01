@@ -181,7 +181,8 @@ def run_ytdlp(video_id, url):
         # Add cookies if available
         if has_cookies:
             info_cmd.extend(["--cookies", str(COOKIES_FILE)])
-            print(f"[{video_id}] Using cookies file: {COOKIES_FILE} with {player_client} client")
+            cookie_source = "from environment variable" if COOKIES_ENV else "from file"
+            print(f"[{video_id}] Using cookies {cookie_source} ({COOKIES_FILE}) with {player_client} client")
         else:
             print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
@@ -213,7 +214,8 @@ def run_ytdlp(video_id, url):
         # Add cookies if available
         if has_cookies:
             cmd.extend(["--cookies", str(COOKIES_FILE)])
-            print(f"[{video_id}] Using cookies file: {COOKIES_FILE} with {player_client} client")
+            cookie_source = "from environment variable" if COOKIES_ENV else "from file"
+            print(f"[{video_id}] Using cookies {cookie_source} ({COOKIES_FILE}) with {player_client} client")
         else:
             print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
