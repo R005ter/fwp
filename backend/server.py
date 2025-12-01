@@ -90,11 +90,17 @@ if COOKIES_ENV:
 # We don't need to import it - yt-dlp will find it automatically
 try:
     import pkg_resources
-    pkg_resources.get_distribution('yt-dlp-get-pot-rustypipe')
-    print("✓ PO Token Provider plugin (yt-dlp-get-pot-rustypipe) is installed")
-except (pkg_resources.DistributionNotFound, ImportError):
+    try:
+        pkg_resources.get_distribution('yt-dlp-get-pot-rustypipe')
+        print("✓ PO Token Provider plugin (yt-dlp-get-pot-rustypipe) is installed")
+    except pkg_resources.DistributionNotFound:
+        # Plugin is in requirements.txt, so it should be installed
+        # yt-dlp will auto-discover it even if we can't verify here
+        print("ℹ PO Token Provider plugin should be available (yt-dlp will auto-discover it)")
+except ImportError:
+    # pkg_resources not available (setuptools not installed)
     # Plugin is in requirements.txt, so it should be installed
-    # yt-dlp will auto-discover it even if we can't verify here
+    # yt-dlp will auto-discover it
     print("ℹ PO Token Provider plugin should be available (yt-dlp will auto-discover it)")
 
 # Determine if we're in production (Render.com sets PORT env var)
