@@ -82,6 +82,12 @@ if COOKIES_ENV:
     except Exception as e:
         print(f"⚠ Warning: Could not decode YouTube cookies from env: {e}")
 
+# PO Token for YouTube (required for mweb client with GVS requests)
+# See: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+PO_TOKEN = os.environ.get('YOUTUBE_PO_TOKEN')
+if PO_TOKEN:
+    print(f"✓ YouTube PO Token loaded from environment variable")
+
 # Determine if we're in production (Render.com sets PORT env var)
 IS_PRODUCTION = 'RENDER' in os.environ or 'PORT' in os.environ
 
@@ -152,9 +158,16 @@ def run_ytdlp(video_id, url):
             player_client = "android"
             user_agent = "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
         
+        # Build extractor args - include PO Token if available and using mweb client
+        extractor_args = f"youtube:player_client={player_client}"
+        if PO_TOKEN and player_client == "mweb":
+            # PO Token required for mweb client GVS requests
+            extractor_args += f",po_token=mweb.gvs+{PO_TOKEN}"
+            print(f"[{video_id}] Using PO Token with {player_client} client")
+        
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", f"youtube:player_client={player_client}",
+            "--extractor-args", extractor_args,
             "--user-agent", user_agent,
             "--referer", "https://www.youtube.com/",
         ]
@@ -183,10 +196,10 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use same client as info fetch (web with cookies, or android without)
+        # Use same client and extractor args as info fetch
         cmd = [
             "yt-dlp",
-            "--extractor-args", f"youtube:player_client={player_client}",
+            "--extractor-args", extractor_args,  # Same extractor args (includes PO Token if available)
             "--user-agent", user_agent,
             "--referer", "https://www.youtube.com/",
         ]
