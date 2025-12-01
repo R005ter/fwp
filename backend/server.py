@@ -9,11 +9,48 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
+from authlib.integrations.flask_client import OAuth
+from database import (
+    init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth,
+    save_show, get_user_shows, delete_show,
+    save_library_metadata, get_user_library, delete_library_item
+)
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app)
+# Use environment variable for secret key in production, generate random one for dev
+app.secret_key = os.environ.get('SECRET_KEY') or ('dev-secret-key-' + str(uuid.uuid4()))
+CORS(app, supports_credentials=True)
+
+# Initialize OAuth
+oauth = OAuth(app)
+
+# Google OAuth configuration
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
+
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    # Determine base URL for redirect URI
+    if os.environ.get('RENDER') == 'true' or os.environ.get('PORT'):
+        # Production - will be set dynamically
+        base_url = None  # Will use request.url_root
+    else:
+        # Development
+        base_url = 'http://localhost:5000'
+    
+    google = oauth.register(
+        name='google',
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={
+            'scope': 'openid email profile'
+        }
+    )
+else:
+    google = None
+    print("⚠️  Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.")
 
 # Configuration
 VIDEOS_DIR = Path(__file__).parent / "videos"
@@ -41,8 +78,23 @@ if not FFMPEG_PATH:
     except FileNotFoundError:
         pass
 
-# Track download progress
+# Track download progress (per user)
 downloads = {}
+
+# Initialize database on startup
+init_db()
+
+
+def get_current_user_id():
+    """Get current user ID from session"""
+    return session.get('user_id')
+
+
+def require_auth():
+    """Check if user is authenticated"""
+    if not get_current_user_id():
+        return jsonify({"error": "Authentication required"}), 401
+    return None
 
 
 def run_ytdlp(video_id, url):
@@ -151,6 +203,10 @@ def run_ytdlp(video_id, url):
 @app.route("/api/download", methods=["POST"])
 def start_download():
     """Start downloading a YouTube video"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
     data = request.json
     url = data.get("url")
     
@@ -162,6 +218,17 @@ def start_download():
         return jsonify({"error": "Please provide a YouTube URL"}), 400
     
     video_id = str(uuid.uuid4())[:8]
+    user_id = get_current_user_id()
+    
+    # Store user_id with download for tracking
+    downloads[video_id] = {
+        "user_id": user_id,
+        "status": "starting",
+        "progress": 0,
+        "title": "Fetching...",
+        "filename": None,
+        "error": None
+    }
     
     # Start download in background thread
     thread = threading.Thread(target=run_ytdlp, args=(video_id, url))
@@ -173,7 +240,16 @@ def start_download():
 @app.route("/api/download/<video_id>", methods=["GET"])
 def get_download_status(video_id):
     """Get the status of a download"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
     if video_id not in downloads:
+        return jsonify({"error": "Download not found"}), 404
+    
+    # Only return download if it belongs to current user
+    if downloads[video_id].get("user_id") != user_id:
         return jsonify({"error": "Download not found"}), 404
     
     return jsonify(downloads[video_id])
@@ -181,13 +257,28 @@ def get_download_status(video_id):
 
 @app.route("/api/videos", methods=["GET"])
 def list_videos():
-    """List all downloaded videos"""
+    """List all downloaded videos (shared across users, but metadata is per-user)"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    user_library = get_user_library(user_id)
+    
     videos = []
     for f in VIDEOS_DIR.glob("*"):
         if f.suffix.lower() in [".mp4", ".webm", ".mkv", ".mov", ".avi"]:
-            # Try to find title from downloads dict
+            # Try to find title from downloads dict or user library
             video_id = f.stem
-            title = downloads.get(video_id, {}).get("title", f.stem)
+            title = downloads.get(video_id, {}).get("title", None)
+            
+            # Check user's library metadata first
+            if f.name in user_library:
+                title = user_library[f.name].get("title", title)
+            
+            if not title:
+                title = f.stem
+            
             videos.append({
                 "id": video_id,
                 "filename": f.name,
@@ -200,6 +291,11 @@ def list_videos():
 @app.route("/api/videos/<filename>", methods=["DELETE"])
 def delete_video(filename):
     """Delete a video file (and any related audio files)"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
     files_deleted = []
     
     # Delete the specified file
@@ -216,6 +312,9 @@ def delete_video(filename):
             related_file.unlink()
             files_deleted.append(related_file.name)
     
+    # Also delete from user's library metadata
+    delete_library_item(user_id, filename)
+    
     if files_deleted:
         return jsonify({"success": True, "deleted": files_deleted})
     return jsonify({"error": "File not found"}), 404
@@ -231,6 +330,244 @@ def serve_video(filename):
 def serve_frontend():
     """Serve the main frontend page"""
     return send_from_directory(app.static_folder, 'index.html')
+
+
+# ======================
+# Authentication Routes
+# ======================
+
+@app.route("/api/auth/register", methods=["POST"])
+def register():
+    """Register a new user"""
+    data = request.json
+    username = data.get("username", "").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "")
+    
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+    
+    if len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
+    
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    
+    user = create_user(username, email, password)
+    if user:
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        return jsonify({"success": True, "user": user}), 201
+    else:
+        return jsonify({"error": "Username or email already exists"}), 409
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    """Login user"""
+    data = request.json
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+    
+    user = verify_user(username, password)
+    if user:
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        return jsonify({"success": True, "user": user})
+    else:
+        return jsonify({"error": "Invalid username or password"}), 401
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def logout():
+    """Logout user"""
+    session.clear()
+    return jsonify({"success": True})
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def get_current_user():
+    """Get current user info"""
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"authenticated": False}), 200
+    
+    user = get_user_by_id(user_id)
+    if user:
+        return jsonify({"authenticated": True, "user": user})
+    else:
+        session.clear()
+        return jsonify({"authenticated": False}), 200
+
+
+@app.route("/api/auth/google", methods=["GET"])
+def google_login():
+    """Initiate Google OAuth login"""
+    if not google:
+        return jsonify({"error": "Google OAuth not configured"}), 503
+    
+    # Build redirect URI dynamically based on current request
+    redirect_uri = url_for('google_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+
+@app.route("/api/auth/google/callback", methods=["GET"])
+def google_callback():
+    """Handle Google OAuth callback"""
+    if not google:
+        return redirect(f"{request.url_root}#/login?error=oauth_not_configured")
+    
+    try:
+        token = google.authorize_access_token()
+        
+        # Fetch user info from Google
+        import requests
+        user_info_response = requests.get(
+            'https://www.googleapis.com/oauth2/v2/userinfo',
+            headers={'Authorization': f"Bearer {token['access_token']}"}
+        )
+        
+        if user_info_response.status_code != 200:
+            return redirect(f"{request.url_root}#/login?error=oauth_failed")
+        
+        user_info = user_info_response.json()
+        
+        # Extract user information
+        google_id = user_info.get('id') or user_info.get('sub')
+        email = user_info.get('email')
+        name = user_info.get('name') or (email.split('@')[0] if email else 'user')
+        picture = user_info.get('picture')
+        
+        if not google_id:
+            return redirect(f"{request.url_root}#/login?error=oauth_failed")
+        
+        # Check if user already exists
+        user = get_user_by_oauth('google', google_id)
+        
+        if not user:
+            # Create new user
+            user = create_user(
+                username=name,
+                email=email,
+                password=None,
+                oauth_provider='google',
+                oauth_id=google_id
+            )
+            
+            if not user:
+                return redirect(f"{request.url_root}#/login?error=user_creation_failed")
+        
+        # Set session
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        
+        # Redirect to frontend with success
+        return redirect(f"{request.url_root}#/dashboard")
+        
+    except Exception as e:
+        print(f"Google OAuth error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return redirect(f"{request.url_root}#/login?error=oauth_error")
+
+
+# ======================
+# User Data Routes
+# ======================
+
+@app.route("/api/shows", methods=["GET"])
+def get_shows():
+    """Get all shows for current user"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    shows = get_user_shows(user_id)
+    return jsonify(shows)
+
+
+@app.route("/api/shows", methods=["POST"])
+def save_show_endpoint():
+    """Save a show"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    data = request.json
+    show_name = data.get("name", "").strip()
+    show_data = data.get("data", {})
+    
+    if not show_name:
+        return jsonify({"error": "Show name required"}), 400
+    
+    user_id = get_current_user_id()
+    save_show(user_id, show_name, show_data)
+    return jsonify({"success": True})
+
+
+@app.route("/api/shows/<show_name>", methods=["DELETE"])
+def delete_show_endpoint(show_name):
+    """Delete a show"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    deleted = delete_show(user_id, show_name)
+    if deleted:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"error": "Show not found"}), 404
+
+
+@app.route("/api/library", methods=["GET"])
+def get_library():
+    """Get library metadata for current user"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    library = get_user_library(user_id)
+    return jsonify(library)
+
+
+@app.route("/api/library", methods=["POST"])
+def save_library_endpoint():
+    """Save library metadata"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    data = request.json
+    filename = data.get("filename")
+    metadata = data.get("metadata", {})
+    
+    if not filename:
+        return jsonify({"error": "Filename required"}), 400
+    
+    user_id = get_current_user_id()
+    save_library_metadata(user_id, filename, metadata)
+    return jsonify({"success": True})
+
+
+@app.route("/api/library/<filename>", methods=["DELETE"])
+def delete_library_endpoint(filename):
+    """Delete library metadata"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    deleted = delete_library_item(user_id, filename)
+    if deleted:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"error": "Library item not found"}), 404
 
 
 @app.route("/api/health")

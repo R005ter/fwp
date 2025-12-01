@@ -59,6 +59,19 @@ git push -u origin main
 5. Render will detect the `render.yaml` file automatically
 6. Click **"Apply"**
 
+### Configure Environment Variables
+
+**Required for authentication:**
+
+1. After creating the service, go to **Environment** tab
+2. Add these environment variables:
+   - **`SECRET_KEY`**: Generate a random string (you can use: `python -c "import secrets; print(secrets.token_hex(32))"`)
+   - **`GOOGLE_CLIENT_ID`**: (Optional) For Google OAuth - see `GOOGLE_OAUTH_SETUP.md`
+   - **`GOOGLE_CLIENT_SECRET`**: (Optional) For Google OAuth - see `GOOGLE_OAUTH_SETUP.md`
+3. Click **Save Changes**
+
+**Note:** Google OAuth is optional. Users can still sign in with username/password if OAuth is not configured.
+
 ### What Render Will Do
 
 ✅ Install Python and dependencies  
@@ -107,8 +120,9 @@ Once deployment completes:
 ### Data Persistence
 
 - ✅ Videos stored on persistent disk (survives redeployments)
-- ✅ localStorage data (shows, library) saved in user's browser
-- ✅ Each user has their own session data
+- ✅ User accounts, shows, and library metadata stored in SQLite database
+- ✅ Each user has their own shows and library settings
+- ✅ Data syncs across devices when logged in
 
 ## 🔧 Updating Your Deployment
 

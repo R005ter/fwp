@@ -49,6 +49,188 @@
       : window.location.origin;
 
     // ======================
+    // Login/Register Component
+    // ======================
+    const LoginView = ({ onLogin }) => {
+      const [isLogin, setIsLogin] = React.useState(true);
+      const [username, setUsername] = React.useState('');
+      const [email, setEmail] = React.useState('');
+      const [password, setPassword] = React.useState('');
+      const [error, setError] = React.useState('');
+      const [loading, setLoading] = React.useState(false);
+
+      // Check for OAuth errors in URL
+      React.useEffect(() => {
+        const hash = window.location.hash;
+        const urlParams = new URLSearchParams(hash.split('?')[1] || '');
+        const oauthError = urlParams.get('error');
+        
+        if (oauthError) {
+          const errorMessages = {
+            'oauth_not_configured': 'Google sign-in is not configured on the server.',
+            'oauth_failed': 'Google sign-in failed. Please try again.',
+            'user_creation_failed': 'Could not create account. Please try again.',
+            'oauth_error': 'An error occurred during sign-in. Please try again.'
+          };
+          setError(errorMessages[oauthError] || 'Sign-in failed. Please try again.');
+          // Clean up URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }, []);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        try {
+          const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+          const body = isLogin 
+            ? { username, password }
+            : { username, email, password };
+
+          const res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(body)
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            onLogin(data.user);
+          } else {
+            setError(data.error || 'Something went wrong');
+          }
+        } catch (err) {
+          setError('Connection error. Is the backend running?');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return React.createElement('div', { 
+        className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4' 
+      },
+        React.createElement('div', { 
+          className: 'bg-gray-800/90 backdrop-blur rounded-lg p-8 w-full max-w-md border border-purple-500/30 shadow-xl' 
+        },
+          React.createElement('div', { className: 'text-center mb-8' },
+            React.createElement('h1', { className: 'text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Planner'),
+            React.createElement('p', { className: 'text-gray-300' }, 
+              isLogin ? 'Sign in to access your shows' : 'Create an account to get started'
+            )
+          ),
+
+          error && React.createElement('div', { 
+            className: 'bg-red-900/50 border border-red-600 text-red-200 px-4 py-3 rounded mb-4 text-sm' 
+          }, error),
+
+          React.createElement('form', { onSubmit: handleSubmit, className: 'space-y-4' },
+            React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Username'),
+              React.createElement('input', {
+                type: 'text',
+                value: username,
+                onChange: (e) => setUsername(e.target.value),
+                required: true,
+                minLength: 3,
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'Enter username',
+                autoFocus: true
+              })
+            ),
+
+            !isLogin && React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Email (optional)'),
+              React.createElement('input', {
+                type: 'email',
+                value: email,
+                onChange: (e) => setEmail(e.target.value),
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'your@email.com'
+              })
+            ),
+
+            React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Password'),
+              React.createElement('input', {
+                type: 'password',
+                value: password,
+                onChange: (e) => setPassword(e.target.value),
+                required: true,
+                minLength: isLogin ? 1 : 6,
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'Enter password'
+              })
+            ),
+
+            React.createElement('button', {
+              type: 'submit',
+              disabled: loading,
+              className: `w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-3 rounded-lg font-bold text-base transition ${loading ? 'opacity-50' : ''}`
+            }, loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')),
+
+            React.createElement('div', { className: 'text-center pt-4' },
+              React.createElement('button', {
+                type: 'button',
+                onClick: () => {
+                  setIsLogin(!isLogin);
+                  setError('');
+                  setPassword('');
+                },
+                className: 'text-purple-400 hover:text-purple-300 text-sm underline'
+              }, isLogin 
+                ? "Don't have an account? Sign up" 
+                : "Already have an account? Sign in"
+              )
+            )
+          ),
+
+          // Google OAuth Button
+          React.createElement('div', { className: 'mt-6' },
+            React.createElement('div', { className: 'flex items-center mb-4' },
+              React.createElement('div', { className: 'flex-1 border-t border-gray-600' }),
+              React.createElement('span', { className: 'px-4 text-sm text-gray-400' }, 'OR'),
+              React.createElement('div', { className: 'flex-1 border-t border-gray-600' })
+            ),
+            React.createElement('button', {
+              type: 'button',
+              onClick: () => {
+                window.location.href = `${API_BASE}/api/auth/google`;
+              },
+              className: 'w-full bg-white hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg font-medium text-base transition flex items-center justify-center gap-3 border border-gray-300'
+            },
+              React.createElement('svg', { 
+                className: 'w-5 h-5',
+                viewBox: '0 0 24 24'
+              },
+                React.createElement('path', {
+                  fill: '#4285F4',
+                  d: 'M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z'
+                }),
+                React.createElement('path', {
+                  fill: '#34A853',
+                  d: 'M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z'
+                }),
+                React.createElement('path', {
+                  fill: '#FBBC05',
+                  d: 'M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z'
+                }),
+                React.createElement('path', {
+                  fill: '#EA4335',
+                  d: 'M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z'
+                })
+              ),
+              React.createElement('span', null, 'Sign in with Google')
+            )
+          )
+        )
+      );
+    };
+
+    // ======================
     // Dashboard Component
     // ======================
     const Dashboard = ({ 
@@ -58,7 +240,9 @@
       savedSessions, 
       onDeleteShow, 
       downloadedVideos,
-      onDownloadComplete 
+      onDownloadComplete,
+      currentUser,
+      onLogout
     }) => {
       const [searchQuery, setSearchQuery] = React.useState('');
       const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
@@ -81,7 +265,9 @@
           const updates = await Promise.all(
             downloading.map(async (dl) => {
               try {
-                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
                 const status = await res.json();
                 return { ...dl, ...status };
               } catch {
@@ -109,6 +295,7 @@
           const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ url: youtubeUrl })
           });
           
@@ -145,7 +332,9 @@
           React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-6 md:mb-8 gap-4' },
             React.createElement('div', null,
               React.createElement('h1', { className: 'text-3xl md:text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Show Planner'),
-              React.createElement('p', { className: 'text-sm md:text-base text-gray-300' }, 'Plan your perfect fireworks show')
+              React.createElement('p', { className: 'text-sm md:text-base text-gray-300' }, 
+                currentUser ? `Welcome, ${currentUser.username}!` : 'Plan your perfect fireworks show'
+              )
             ),
             React.createElement('div', { className: 'flex flex-col sm:flex-row gap-2 w-full md:w-auto' },
               React.createElement('button', {
@@ -155,7 +344,11 @@
               React.createElement('button', {
                 onClick: onNewShow,
                 className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg'
-              }, '+ New Show')
+              }, '+ New Show'),
+              React.createElement('button', {
+                onClick: onLogout,
+                className: 'bg-gray-600 hover:bg-gray-700 px-4 py-3 rounded-lg font-medium text-sm md:text-base transition'
+              }, '🚪 Logout')
             )
           ),
 
@@ -402,7 +595,9 @@
           const updates = await Promise.all(
             downloading.map(async (dl) => {
               try {
-                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
                 const status = await res.json();
                 return { ...dl, ...status };
               } catch {
@@ -431,6 +626,7 @@
           const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ url: youtubeUrl })
           });
           
@@ -1051,7 +1247,9 @@
           const updates = await Promise.all(
             downloading.map(async (dl) => {
               try {
-                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
                 const status = await res.json();
                 return { ...dl, ...status };
               } catch {
@@ -1080,6 +1278,7 @@
           const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ url: youtubeUrl })
           });
           
@@ -1705,6 +1904,11 @@
     // Main App Component
     // ======================
     const FireworksPlanner = () => {
+      // Authentication state
+      const [authenticated, setAuthenticated] = React.useState(false);
+      const [currentUser, setCurrentUser] = React.useState(null);
+      const [checkingAuth, setCheckingAuth] = React.useState(true);
+      
       const [currentView, setCurrentView] = React.useState('dashboard'); // 'dashboard', 'library', 'editor'
       const [currentShowName, setCurrentShowName] = React.useState(null);
       
@@ -1735,31 +1939,134 @@
         }, 3000);
       };
 
+      // Check authentication on mount
       React.useEffect(() => {
-        loadSessionsList();
-        loadAvailableVideos();
-        
-        const savedGridHeight = localStorage.getItem('fwp_gridHeight');
-        if (savedGridHeight) {
-          setGridHeight(parseInt(savedGridHeight));
-        }
+        checkAuth();
       }, []);
 
-      const loadSessionsList = () => {
-        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-        setSavedSessions(sessions);
+      // Load data when authenticated
+      React.useEffect(() => {
+        if (authenticated) {
+          loadSessionsList();
+          loadAvailableVideos();
+          
+          const savedGridHeight = localStorage.getItem('fwp_gridHeight');
+          if (savedGridHeight) {
+            setGridHeight(parseInt(savedGridHeight));
+          }
+        }
+      }, [authenticated]);
+
+      const checkAuth = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/auth/me`, {
+            credentials: 'include'
+          });
+          const data = await res.json();
+          
+          if (data.authenticated && data.user) {
+            setAuthenticated(true);
+            setCurrentUser(data.user);
+            // Clean up OAuth redirect URL if present
+            const hash = window.location.hash;
+            if (hash.includes('#/dashboard') || hash.includes('error=')) {
+              window.history.replaceState({}, document.title, window.location.pathname + '#/dashboard');
+            }
+          } else {
+            setAuthenticated(false);
+            setCurrentUser(null);
+          }
+        } catch (err) {
+          console.error('Auth check failed:', err);
+          setAuthenticated(false);
+        } finally {
+          setCheckingAuth(false);
+        }
+      };
+
+      const handleLogin = (user) => {
+        setAuthenticated(true);
+        setCurrentUser(user);
+        showToast(`Welcome, ${user.username}!`, 'success');
+      };
+
+      const handleLogout = async () => {
+        try {
+          await fetch(`${API_BASE}/api/auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+          });
+        } catch (err) {
+          console.error('Logout error:', err);
+        }
+        
+        setAuthenticated(false);
+        setCurrentUser(null);
+        setSavedSessions([]);
+        setDownloadedVideos(new Map());
+        setVideos([]);
+        setCurrentView('dashboard');
+        showToast('Logged out', 'info');
+      };
+
+      const loadSessionsList = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/shows`, {
+            credentials: 'include'
+          });
+          if (res.ok) {
+            const sessions = await res.json();
+            setSavedSessions(sessions.map(s => ({
+              name: s.name,
+              timestamp: s.timestamp,
+              totalDuration: s.data.totalDuration || 60,
+              zoom: s.data.zoom || 1,
+              videos: s.data.videos || []
+            })));
+          } else {
+            // Fallback to localStorage if server fails
+            const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+            setSavedSessions(sessions);
+          }
+        } catch (err) {
+          console.error('Failed to load shows from server:', err);
+          // Fallback to localStorage
+          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+          setSavedSessions(sessions);
+        }
       };
 
       const loadAvailableVideos = async () => {
         try {
-          const res = await fetch(`${API_BASE}/api/videos`);
-          const serverVideos = await res.json();
+          // Load videos from server
+          const videosRes = await fetch(`${API_BASE}/api/videos`, {
+            credentials: 'include'
+          });
+          if (!videosRes.ok) throw new Error('Failed to load videos');
           
-          const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+          const serverVideos = await videosRes.json();
+          
+          // Load library metadata from server
+          let serverLibrary = {};
+          try {
+            const libraryRes = await fetch(`${API_BASE}/api/library`, {
+              credentials: 'include'
+            });
+            if (libraryRes.ok) {
+              serverLibrary = await libraryRes.json();
+            }
+          } catch (e) {
+            console.warn('Failed to load library from server, using fallback');
+          }
+          
+          // Fallback to localStorage if server library is empty
+          if (Object.keys(serverLibrary).length === 0) {
+            serverLibrary = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+          }
           
           const videoMap = new Map();
           serverVideos.forEach(video => {
-            const savedData = libraryData[video.filename] || {};
+            const savedData = serverLibrary[video.filename] || {};
             videoMap.set(video.filename, {
               filename: video.filename,
               title: savedData.title || video.title || video.filename,
@@ -1782,7 +2089,7 @@
         }
       };
 
-      const saveLibraryMetadata = (videos) => {
+      const saveLibraryMetadata = async (videos) => {
         const libraryData = {};
         videos.forEach((video, filename) => {
           libraryData[filename] = {
@@ -1797,7 +2104,25 @@
             defaultCropHeight: video.defaultCropHeight || 100
           };
         });
+        
+        // Save to localStorage (fallback)
         localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+        
+        // Sync to server
+        if (authenticated) {
+          try {
+            for (const [filename, metadata] of Object.entries(libraryData)) {
+              await fetch(`${API_BASE}/api/library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ filename, metadata })
+              });
+            }
+          } catch (err) {
+            console.warn('Failed to sync library to server:', err);
+          }
+        }
       };
 
       const handleNewShow = () => {
@@ -1810,9 +2135,38 @@
         setCurrentView('editor');
       };
 
-      const handleEditShow = (showName) => {
-        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-        const session = sessions.find(s => s.name === showName);
+      const handleEditShow = async (showName) => {
+        let session = null;
+        
+        // Try to load from server first
+        if (authenticated) {
+          try {
+            const res = await fetch(`${API_BASE}/api/shows`, {
+              credentials: 'include'
+            });
+            if (res.ok) {
+              const shows = await res.json();
+              const foundShow = shows.find(s => s.name === showName);
+              if (foundShow) {
+                session = {
+                  name: foundShow.name,
+                  timestamp: foundShow.timestamp,
+                  totalDuration: foundShow.data.totalDuration || 60,
+                  zoom: foundShow.data.zoom || 1,
+                  videos: foundShow.data.videos || []
+                };
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to load show from server:', err);
+          }
+        }
+        
+        // Fallback to localStorage
+        if (!session) {
+          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+          session = sessions.find(s => s.name === showName);
+        }
         
         if (!session) {
           showToast('Session not found', 'error');
@@ -1820,12 +2174,21 @@
         }
 
         videos.forEach(v => {
-          if (v.url.startsWith('blob:')) {
+          if (v.url && v.url.startsWith('blob:')) {
             URL.revokeObjectURL(v.url);
           }
         });
 
-        setVideos(session.videos.filter(v => v.url));
+        // Restore video URLs from API_BASE if needed
+        const restoredVideos = session.videos
+          .filter(v => v.filename || v.url)
+          .map(v => ({
+            ...v,
+            url: v.url || (v.filename ? `${API_BASE}/videos/${v.filename}` : null)
+          }))
+          .filter(v => v.url);
+
+        setVideos(restoredVideos);
         setTotalDuration(session.totalDuration || 60);
         setZoom(session.zoom || 1);
         setMasterTime(0);
@@ -1854,10 +2217,24 @@
         loadAvailableVideos();
       };
 
-      const handleDeleteShow = (name) => {
+      const handleDeleteShow = async (name) => {
+        // Delete from localStorage
         const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
         const filtered = sessions.filter(s => s.name !== name);
         localStorage.setItem('fwp_sessions', JSON.stringify(filtered));
+        
+        // Delete from server
+        if (authenticated) {
+          try {
+            await fetch(`${API_BASE}/api/shows/${encodeURIComponent(name)}`, {
+              method: 'DELETE',
+              credentials: 'include'
+            });
+          } catch (err) {
+            console.warn('Failed to delete show from server:', err);
+          }
+        }
+        
         loadSessionsList();
         showToast(`Deleted show "${name}"`, 'success');
       };
@@ -1883,7 +2260,8 @@
       const handleDeleteVideo = async (video) => {
         try {
           await fetch(`${API_BASE}/api/videos/${video.filename}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
           });
           
           setDownloadedVideos(prev => {
@@ -1934,15 +2312,13 @@
         setVideos(prev => [...prev, newInstance]);
       };
 
-      const saveShow = (name, silent = false) => {
+      const saveShow = async (name, silent = false) => {
         if (!name || !name.trim()) {
           if (!silent) showToast('Please enter a show name', 'warning');
           return;
         }
 
-        const session = {
-          name: name.trim(),
-          timestamp: new Date().toISOString(),
+        const sessionData = {
           totalDuration,
           zoom,
           videos: videos.map(v => ({
@@ -1963,6 +2339,12 @@
           }))
         };
 
+        // Save to localStorage (fallback)
+        const session = {
+          name: name.trim(),
+          timestamp: new Date().toISOString(),
+          ...sessionData
+        };
         const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
         const existingIndex = sessions.findIndex(s => s.name === name.trim());
         
@@ -1974,6 +2356,24 @@
 
         localStorage.setItem('fwp_sessions', JSON.stringify(sessions));
         localStorage.setItem('fwp_lastSession', name.trim());
+
+        // Sync to server
+        if (authenticated) {
+          try {
+            await fetch(`${API_BASE}/api/shows`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                name: name.trim(),
+                data: sessionData
+              })
+            });
+          } catch (err) {
+            console.warn('Failed to sync show to server:', err);
+          }
+        }
+
         loadSessionsList();
         setCurrentShowName(name.trim());
         if (!silent) {
@@ -2053,6 +2453,23 @@
         });
       }, [masterTime, videos, isPlaying]);
 
+      // Show loading while checking auth
+      if (checkingAuth) {
+        return React.createElement('div', { 
+          className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center' 
+        },
+          React.createElement('div', { className: 'text-center' },
+            React.createElement('div', { className: 'text-4xl mb-4' }, '🎆'),
+            React.createElement('p', { className: 'text-gray-400' }, 'Loading...')
+          )
+        );
+      }
+
+      // Show login if not authenticated
+      if (!authenticated) {
+        return React.createElement(LoginView, { onLogin: handleLogin });
+      }
+
       return React.createElement('div', null,
         currentView === 'dashboard' 
           ? React.createElement(Dashboard, {
@@ -2062,7 +2479,9 @@
               savedSessions,
               onDeleteShow: handleDeleteShow,
               downloadedVideos,
-              onDownloadComplete: handleDownloadComplete
+              onDownloadComplete: handleDownloadComplete,
+              currentUser,
+              onLogout: handleLogout
             })
           : currentView === 'library'
           ? React.createElement(LibraryView, {

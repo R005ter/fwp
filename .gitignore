@@ -41,6 +41,10 @@ desktop.ini
 .env
 .env.local
 
+# Database (contains user data)
+*.db
+backend/fireworks.db
+
 # Temporary files
 *.tmp
 *.temp
