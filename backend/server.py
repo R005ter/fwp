@@ -141,18 +141,28 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use android client (android_embedded is not supported)
+        # Use web client when cookies are available (supports cookies), otherwise use android
+        has_cookies = COOKIES_FILE.exists()
+        if has_cookies:
+            # web client supports cookies
+            player_client = "web"
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        else:
+            # android client doesn't support cookies but may work without them
+            player_client = "android"
+            user_agent = "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
+        
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android",  # Use Android client (not android_embedded)
-            "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
-            "--referer", "https://www.youtube.com/",  # Set referer
+            "--extractor-args", f"youtube:player_client={player_client}",
+            "--user-agent", user_agent,
+            "--referer", "https://www.youtube.com/",
         ]
         
         # Add cookies if available
-        if COOKIES_FILE.exists():
+        if has_cookies:
             info_cmd.extend(["--cookies", str(COOKIES_FILE)])
-            print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+            print(f"[{video_id}] Using cookies file: {COOKIES_FILE} with {player_client} client")
         else:
             print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
@@ -173,18 +183,18 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use android client (android_embedded is not supported)
+        # Use same client as info fetch (web with cookies, or android without)
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android",  # Use Android client (not android_embedded)
-            "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
-            "--referer", "https://www.youtube.com/",  # Set referer
+            "--extractor-args", f"youtube:player_client={player_client}",
+            "--user-agent", user_agent,
+            "--referer", "https://www.youtube.com/",
         ]
         
         # Add cookies if available
-        if COOKIES_FILE.exists():
+        if has_cookies:
             cmd.extend(["--cookies", str(COOKIES_FILE)])
-            print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+            print(f"[{video_id}] Using cookies file: {COOKIES_FILE} with {player_client} client")
         else:
             print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
