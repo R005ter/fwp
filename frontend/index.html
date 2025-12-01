@@ -169,22 +169,39 @@
     
     // Download video via Piped API (preferred method)
     async function downloadViaPiped(videoId, onProgress) {
-      for (const instance of PIPED_INSTANCES) {
+      console.log('[Piped] Starting download via Piped API for video:', videoId);
+      console.log('[Piped] Available instances:', PIPED_INSTANCES.length);
+      
+      for (let i = 0; i < PIPED_INSTANCES.length; i++) {
+        const instance = PIPED_INSTANCES[i];
         try {
-          console.log(`Trying Piped instance: ${instance}`);
+          console.log(`[Piped] Attempt ${i + 1}/${PIPED_INSTANCES.length}: Trying instance ${instance}`);
           
           // Get video info
-          const infoResponse = await fetch(`${instance}/streams/${videoId}`, {
+          const infoUrl = `${instance}/streams/${videoId}`;
+          console.log('[Piped] Fetching video info from:', infoUrl);
+          
+          const infoResponse = await fetch(infoUrl, {
             headers: { 'Accept': 'application/json' }
           });
           
+          console.log('[Piped] Info response status:', infoResponse.status, infoResponse.statusText);
+          
           if (!infoResponse.ok) {
-            throw new Error(`HTTP ${infoResponse.status}`);
+            const errorText = await infoResponse.text().catch(() => 'No error details');
+            console.warn(`[Piped] Instance ${instance} returned ${infoResponse.status}:`, errorText);
+            throw new Error(`HTTP ${infoResponse.status}: ${errorText.substring(0, 100)}`);
           }
           
           const videoInfo = await infoResponse.json();
+          console.log('[Piped] Video info received:', {
+            title: videoInfo.title,
+            hasStreams: !!videoInfo.videoStreams,
+            streamCount: videoInfo.videoStreams?.length || 0
+          });
           
           if (!videoInfo.videoStreams || videoInfo.videoStreams.length === 0) {
+            console.warn('[Piped] No video streams in response:', videoInfo);
             throw new Error('No video streams available');
           }
           
@@ -193,7 +210,15 @@
             s.format === 'mp4' || s.format === 'webm'
           );
           
+          console.log('[Piped] Filtered video streams:', {
+            total: videoInfo.videoStreams.length,
+            compatible: videoStreams.length,
+            formats: videoStreams.map(s => ({ format: s.format, quality: s.quality }))
+          });
+          
           if (videoStreams.length === 0) {
+            console.warn('[Piped] No compatible formats. Available formats:', 
+              videoInfo.videoStreams.map(s => s.format).join(', '));
             throw new Error('No compatible video formats');
           }
           
@@ -207,34 +232,67 @@
           const bestStream = videoStreams[0];
           const videoUrl = bestStream.url;
           
+          console.log('[Piped] Selected stream:', {
+            quality: bestStream.quality,
+            format: bestStream.format,
+            urlLength: videoUrl?.length || 0,
+            hasUrl: !!videoUrl
+          });
+          
           if (!videoUrl) {
-            throw new Error('No video URL found');
+            console.error('[Piped] Stream object:', bestStream);
+            throw new Error('No video URL found in stream');
           }
           
-          console.log(`Downloading from Piped: ${instance}`);
+          console.log(`[Piped] Starting download from: ${instance}`);
+          console.log(`[Piped] Video URL: ${videoUrl.substring(0, 100)}...`);
           
           // Download the video with progress tracking
+          console.log('[Piped] Fetching video file...');
           const videoResponse = await fetch(videoUrl);
           
+          console.log('[Piped] Video response:', {
+            status: videoResponse.status,
+            statusText: videoResponse.statusText,
+            contentType: videoResponse.headers.get('Content-Type'),
+            contentLength: videoResponse.headers.get('Content-Length')
+          });
+          
           if (!videoResponse.ok) {
+            const errorText = await videoResponse.text().catch(() => 'No error details');
+            console.error(`[Piped] Download failed: HTTP ${videoResponse.status}`, errorText.substring(0, 200));
             throw new Error(`Download failed: HTTP ${videoResponse.status}`);
           }
           
           const contentLength = parseInt(videoResponse.headers.get('Content-Length') || '0', 10);
+          console.log('[Piped] Content length:', contentLength, 'bytes');
+          
           const reader = videoResponse.body.getReader();
           
           let receivedLength = 0;
           const chunks = [];
+          let lastProgressLog = 0;
           
+          console.log('[Piped] Starting to read video stream...');
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              console.log('[Piped] Stream reading complete. Total received:', receivedLength, 'bytes');
+              break;
+            }
             
             chunks.push(value);
             receivedLength += value.length;
             
             if (onProgress && contentLength > 0) {
               const percentage = (receivedLength / contentLength) * 100;
+              
+              // Log progress every 10%
+              if (percentage - lastProgressLog >= 10) {
+                console.log(`[Piped] Download progress: ${Math.round(percentage)}% (${receivedLength}/${contentLength} bytes)`);
+                lastProgressLog = percentage;
+              }
+              
               onProgress({
                 loaded: receivedLength,
                 total: contentLength,
@@ -243,13 +301,28 @@
             }
           }
           
+          console.log('[Piped] Creating blob from chunks...');
           const blob = new Blob(chunks, { type: 'video/mp4' });
+          console.log('[Piped] Blob created:', {
+            size: blob.size,
+            type: blob.type
+          });
           
           // Save to IndexedDB
+          console.log('[Piped] Saving to IndexedDB...');
           await saveVideoToDB(videoId, blob, {
             title: videoInfo.title || `Video ${videoId}`,
             duration: videoInfo.duration || 0,
             thumbnail: videoInfo.thumbnailUrl
+          });
+          console.log('[Piped] Saved to IndexedDB successfully');
+          
+          const localUrl = URL.createObjectURL(blob);
+          console.log('[Piped] Download complete!', {
+            videoId,
+            title: videoInfo.title,
+            blobSize: blob.size,
+            instance
           });
           
           return {
@@ -257,16 +330,22 @@
             videoId,
             title: videoInfo.title || `Video ${videoId}`,
             blob,
-            localUrl: URL.createObjectURL(blob),
+            localUrl: localUrl,
             instance: `Piped (${instance})`
           };
           
         } catch (error) {
-          console.warn(`Piped instance ${instance} failed:`, error.message);
+          console.warn(`[Piped] Instance ${instance} failed:`, {
+            message: error.message,
+            stack: error.stack,
+            attempt: i + 1,
+            total: PIPED_INSTANCES.length
+          });
           continue;
         }
       }
       
+      console.error('[Piped] All instances failed after trying', PIPED_INSTANCES.length, 'instances');
       throw new Error('All Piped instances failed');
     }
     
@@ -365,15 +444,21 @@
     
     // Main client-side download function with multiple fallbacks
     async function downloadYouTubeVideoClient(url, onProgress) {
+      console.log('[DownloadClient] Starting client-side download...', { url });
+      
       const videoId = extractVideoId(url);
+      console.log('[DownloadClient] Extracted video ID:', videoId);
       
       if (!videoId) {
+        console.error('[DownloadClient] Invalid video ID extracted from URL:', url);
         throw new Error('Invalid YouTube URL');
       }
       
       // Check if already downloaded
+      console.log('[DownloadClient] Checking cache...');
       const existing = await getVideoFromDB(videoId);
       if (existing) {
+        console.log('[DownloadClient] Video found in cache, returning cached version');
         const metadata = await getVideoMetadataFromDB(videoId);
         return {
           success: true,
@@ -384,21 +469,39 @@
         };
       }
       
+      console.log('[DownloadClient] Video not cached, starting download process...');
+      
       // Try Piped first (most reliable)
       try {
-        console.log('Attempting download via Piped API...');
-        return await downloadViaPiped(videoId, onProgress);
+        console.log('[DownloadClient] Attempting download via Piped API (primary method)...');
+        const result = await downloadViaPiped(videoId, onProgress);
+        console.log('[DownloadClient] Piped download successful!');
+        return result;
       } catch (pipedError) {
-        console.warn('Piped download failed, trying Invidious...', pipedError.message);
+        console.error('[DownloadClient] Piped download failed:', {
+          message: pipedError.message,
+          stack: pipedError.stack
+        });
+        console.log('[DownloadClient] Falling back to Invidious API...');
         
         // Fallback to Invidious
         try {
-          return await downloadViaInvidious(videoId, onProgress);
+          const result = await downloadViaInvidious(videoId, onProgress);
+          console.log('[DownloadClient] Invidious download successful!');
+          return result;
         } catch (invidiousError) {
-          console.warn('Invidious download failed, falling back to server...', invidiousError.message);
+          console.error('[DownloadClient] Invidious download also failed:', {
+            message: invidiousError.message,
+            stack: invidiousError.stack
+          });
+          console.error('[DownloadClient] All client-side methods failed. Error summary:', {
+            pipedError: pipedError.message,
+            invidiousError: invidiousError.message,
+            videoId: videoId
+          });
           
           // Final fallback: server-side download (if available)
-          throw new Error('Client-side download failed. Please ensure you have cookies configured for server-side downloads, or try again later.');
+          throw new Error(`Client-side download failed. Piped: ${pipedError.message}. Invidious: ${invidiousError.message}`);
         }
       }
     }
