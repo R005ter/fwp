@@ -67,8 +67,9 @@ VIDEOS_DIR.mkdir(exist_ok=True)
 # Cookies file for YouTube (to avoid bot detection)
 COOKIES_FILE = Path(__file__).parent / "youtube_cookies.txt"
 # Check if cookies are provided via environment variable (base64 encoded)
+# Always update from env var if provided (to allow updating cookies without redeploy)
 COOKIES_ENV = os.environ.get('YOUTUBE_COOKIES')
-if COOKIES_ENV and not COOKIES_FILE.exists():
+if COOKIES_ENV:
     try:
         import base64
         cookies_data = base64.b64decode(COOKIES_ENV).decode('utf-8')
