@@ -49,6 +49,244 @@
       : window.location.origin;
 
     // ======================
+    // Client-Side YouTube Downloader (Invidious API + IndexedDB)
+    // ======================
+    
+    // Invidious instances (fallback if one is down)
+    const INVIDIOUS_INSTANCES = [
+      'https://invidious.flokinet.to',
+      'https://invidious.io.lol',
+      'https://invidious.osi.kr',
+      'https://invidious.privacyredirect.com',
+      'https://yewtu.be'
+    ];
+    
+    // Extract YouTube video ID from URL
+    function extractVideoId(url) {
+      const patterns = [
+        /[?&]v=([^&]+)/,
+        /youtu\.be\/([^?&]+)/,
+        /^([a-zA-Z0-9_-]{11})$/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+      }
+      return null;
+    }
+    
+    // IndexedDB utilities for storing videos
+    const DB_NAME = 'FireworksVideos';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'videos';
+    
+    async function openVideoDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: 'videoId' });
+            store.createIndex('timestamp', 'timestamp', { unique: false });
+          }
+        };
+      });
+    }
+    
+    async function saveVideoToDB(videoId, blob, metadata = {}) {
+      const db = await openVideoDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        
+        const request = store.put({
+          videoId,
+          blob,
+          timestamp: Date.now(),
+          ...metadata
+        });
+        
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+    
+    async function getVideoFromDB(videoId) {
+      const db = await openVideoDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readonly');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get(videoId);
+        
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result && result.blob) {
+            resolve(URL.createObjectURL(result.blob));
+          } else {
+            resolve(null);
+          }
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
+    
+    async function getVideoMetadataFromDB(videoId) {
+      const db = await openVideoDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readonly');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get(videoId);
+        
+        request.onsuccess = () => {
+          const result = request.result;
+          if (result) {
+            resolve({
+              videoId: result.videoId,
+              title: result.title,
+              timestamp: result.timestamp,
+              ...result
+            });
+          } else {
+            resolve(null);
+          }
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
+    
+    // Download video via Invidious API
+    async function downloadViaInvidious(videoId, onProgress) {
+      // Try each Invidious instance until one works
+      for (const instance of INVIDIOUS_INSTANCES) {
+        try {
+          console.log(`Trying Invidious instance: ${instance}`);
+          
+          // Get video info
+          const infoResponse = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (!infoResponse.ok) {
+            throw new Error(`HTTP ${infoResponse.status}`);
+          }
+          
+          const videoInfo = await infoResponse.json();
+          
+          // Find best quality video format
+          const formats = videoInfo.formatStreams || videoInfo.adaptiveFormats || [];
+          const videoFormats = formats.filter(f => 
+            f.type && (f.type.includes('video/mp4') || f.type.includes('video/webm'))
+          );
+          
+          if (videoFormats.length === 0) {
+            throw new Error('No video formats available');
+          }
+          
+          // Sort by quality/bitrate (best first)
+          videoFormats.sort((a, b) => {
+            const aQuality = a.quality || a.bitrate || 0;
+            const bQuality = b.quality || b.bitrate || 0;
+            return bQuality - aQuality;
+          });
+          
+          const bestFormat = videoFormats[0];
+          const videoUrl = bestFormat.url || bestFormat.src;
+          
+          if (!videoUrl) {
+            throw new Error('No video URL found');
+          }
+          
+          console.log(`Downloading from: ${instance}`);
+          
+          // Download the video with progress tracking
+          const videoResponse = await fetch(videoUrl);
+          
+          if (!videoResponse.ok) {
+            throw new Error(`Download failed: HTTP ${videoResponse.status}`);
+          }
+          
+          const contentLength = parseInt(videoResponse.headers.get('Content-Length') || '0', 10);
+          const reader = videoResponse.body.getReader();
+          
+          let receivedLength = 0;
+          const chunks = [];
+          
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            chunks.push(value);
+            receivedLength += value.length;
+            
+            if (onProgress && contentLength > 0) {
+              const percentage = (receivedLength / contentLength) * 100;
+              onProgress({
+                loaded: receivedLength,
+                total: contentLength,
+                percentage: Math.min(percentage, 100)
+              });
+            }
+          }
+          
+          const blob = new Blob(chunks, { type: 'video/mp4' });
+          
+          // Save to IndexedDB
+          await saveVideoToDB(videoId, blob, {
+            title: videoInfo.title || `Video ${videoId}`,
+            duration: videoInfo.lengthSeconds || 0,
+            thumbnail: videoInfo.videoThumbnails?.[0]?.url
+          });
+          
+          return {
+            success: true,
+            videoId,
+            title: videoInfo.title || `Video ${videoId}`,
+            blob,
+            localUrl: URL.createObjectURL(blob),
+            instance
+          };
+          
+        } catch (error) {
+          console.warn(`Instance ${instance} failed:`, error.message);
+          // Try next instance
+          continue;
+        }
+      }
+      
+      throw new Error('All Invidious instances failed. Please try again later.');
+    }
+    
+    // Main client-side download function
+    async function downloadYouTubeVideoClient(url, onProgress) {
+      const videoId = extractVideoId(url);
+      
+      if (!videoId) {
+        throw new Error('Invalid YouTube URL');
+      }
+      
+      // Check if already downloaded
+      const existing = await getVideoFromDB(videoId);
+      if (existing) {
+        const metadata = await getVideoMetadataFromDB(videoId);
+        return {
+          success: true,
+          videoId,
+          title: metadata?.title || `Video ${videoId}`,
+          localUrl: existing,
+          cached: true
+        };
+      }
+      
+      // Download via Invidious
+      return await downloadViaInvidious(videoId, onProgress);
+    }
+
+    // ======================
     // Login/Register Component
     // ======================
     const LoginView = ({ onLogin }) => {
@@ -293,30 +531,71 @@
       const handleYoutubeDownload = async () => {
         if (!youtubeUrl.trim()) return;
         
-        try {
-          const res = await fetch(`${API_BASE}/api/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ url: youtubeUrl })
+        const videoId = extractVideoId(youtubeUrl);
+        if (!videoId) {
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Check if already downloaded
+        const existing = await getVideoFromDB(videoId);
+        if (existing) {
+          const metadata = await getVideoMetadataFromDB(videoId);
+          onDownloadComplete({
+            id: videoId,
+            videoId: videoId,
+            filename: `${videoId}.mp4`,
+            title: metadata?.title || `Video ${videoId}`,
+            status: 'complete',
+            localUrl: existing,
+            cached: true
           });
-          
-          const data = await res.json();
-          
-          if (data.error) {
-            alert(`Error: ${data.error}`);
-            return;
-          }
-          
-          setDownloading(prev => [...prev, { 
-            id: data.id, 
-            url: youtubeUrl, 
-            status: 'downloading',
-            progress: 0 
-          }]);
           setYoutubeUrl('');
+          return;
+        }
+        
+        // Start client-side download
+        const downloadId = videoId;
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Downloading...'
+        }]);
+        
+        try {
+          const result = await downloadYouTubeVideoClient(
+            youtubeUrl,
+            (progressData) => {
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
+                  : dl
+              ));
+            }
+          );
+          
+          if (result.success) {
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: result.videoId,
+              filename: `${result.videoId}.mp4`,
+              title: result.title,
+              status: 'complete',
+              localUrl: result.localUrl,
+              cached: result.cached || false
+            });
+            setYoutubeUrl('');
+          } else {
+            throw new Error(result.error || 'Download failed');
+          }
         } catch (err) {
-          alert('Failed to start download. Is the backend running?');
+          console.error('Download error:', err);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
@@ -453,15 +732,10 @@
             React.createElement('div', { className: 'space-y-6' },
               React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30' },
                 React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 YouTube Downloader'),
-                backendStatus?.status === 'ok' 
-                  ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
-                      React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
-                      `Connected • yt-dlp ${backendStatus.ytdlp_version}`
-                    )
-                  : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
-                      React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
-                      'Backend offline - start server.py'
-                    ),
+                React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
+                  'Client-side download • No server required'
+                ),
                 
                 React.createElement('div', { className: 'space-y-3' },
                   React.createElement('input', {
@@ -474,7 +748,7 @@
                   }),
                   React.createElement('button', {
                     onClick: handleYoutubeDownload,
-                    disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                    disabled: !youtubeUrl.trim(),
                     className: 'w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition font-bold'
                   }, 'Download Video'),
 
@@ -624,30 +898,71 @@
       const handleYoutubeDownload = async () => {
         if (!youtubeUrl.trim()) return;
         
-        try {
-          const res = await fetch(`${API_BASE}/api/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ url: youtubeUrl })
+        const videoId = extractVideoId(youtubeUrl);
+        if (!videoId) {
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Check if already downloaded
+        const existing = await getVideoFromDB(videoId);
+        if (existing) {
+          const metadata = await getVideoMetadataFromDB(videoId);
+          onDownloadComplete({
+            id: videoId,
+            videoId: videoId,
+            filename: `${videoId}.mp4`,
+            title: metadata?.title || `Video ${videoId}`,
+            status: 'complete',
+            localUrl: existing,
+            cached: true
           });
-          
-          const data = await res.json();
-          
-          if (data.error) {
-            alert(`Error: ${data.error}`);
-            return;
-          }
-          
-          setDownloading(prev => [...prev, { 
-            id: data.id, 
-            url: youtubeUrl, 
-            status: 'downloading',
-            progress: 0 
-          }]);
           setYoutubeUrl('');
+          return;
+        }
+        
+        // Start client-side download
+        const downloadId = videoId;
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Downloading...'
+        }]);
+        
+        try {
+          const result = await downloadYouTubeVideoClient(
+            youtubeUrl,
+            (progressData) => {
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
+                  : dl
+              ));
+            }
+          );
+          
+          if (result.success) {
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: result.videoId,
+              filename: `${result.videoId}.mp4`,
+              title: result.title,
+              status: 'complete',
+              localUrl: result.localUrl,
+              cached: result.cached || false
+            });
+            setYoutubeUrl('');
+          } else {
+            throw new Error(result.error || 'Download failed');
+          }
         } catch (err) {
-          alert('Failed to start download. Is the backend running?');
+          console.error('Download error:', err);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
@@ -722,15 +1037,10 @@
               // YouTube Downloader Section
               React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30 mb-6' },
                 React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 Add Videos to Library'),
-                backendStatus?.status === 'ok' 
-                  ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
-                      React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
-                      `Connected • yt-dlp ${backendStatus.ytdlp_version}`
-                    )
-                  : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
-                      React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
-                      'Backend offline - start server.py'
-                    ),
+                React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
+                  'Client-side download • No server required'
+                ),
                 
                 React.createElement('div', { className: 'space-y-3' },
                   React.createElement('div', { className: 'flex gap-2' },
@@ -744,7 +1054,7 @@
                     }),
                     React.createElement('button', {
                       onClick: handleYoutubeDownload,
-                      disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                      disabled: !youtubeUrl.trim(),
                       className: 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold'
                     }, 'Download')
                   ),
@@ -1276,30 +1586,71 @@
       const handleYoutubeDownload = async () => {
         if (!youtubeUrl.trim()) return;
         
-        try {
-          const res = await fetch(`${API_BASE}/api/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ url: youtubeUrl })
+        const videoId = extractVideoId(youtubeUrl);
+        if (!videoId) {
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Check if already downloaded
+        const existing = await getVideoFromDB(videoId);
+        if (existing) {
+          const metadata = await getVideoMetadataFromDB(videoId);
+          onDownloadComplete({
+            id: videoId,
+            videoId: videoId,
+            filename: `${videoId}.mp4`,
+            title: metadata?.title || `Video ${videoId}`,
+            status: 'complete',
+            localUrl: existing,
+            cached: true
           });
-          
-          const data = await res.json();
-          
-          if (data.error) {
-            alert(`Error: ${data.error}`);
-            return;
-          }
-          
-          setDownloading(prev => [...prev, { 
-            id: data.id, 
-            url: youtubeUrl, 
-            status: 'downloading',
-            progress: 0 
-          }]);
           setYoutubeUrl('');
+          return;
+        }
+        
+        // Start client-side download
+        const downloadId = videoId;
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Downloading...'
+        }]);
+        
+        try {
+          const result = await downloadYouTubeVideoClient(
+            youtubeUrl,
+            (progressData) => {
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
+                  : dl
+              ));
+            }
+          );
+          
+          if (result.success) {
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: result.videoId,
+              filename: `${result.videoId}.mp4`,
+              title: result.title,
+              status: 'complete',
+              localUrl: result.localUrl,
+              cached: result.cached || false
+            });
+            setYoutubeUrl('');
+          } else {
+            throw new Error(result.error || 'Download failed');
+          }
         } catch (err) {
-          alert('Failed to start download. Is the backend running?');
+          console.error('Download error:', err);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
@@ -2315,10 +2666,36 @@
       };
 
       const handleDownloadComplete = async (dl) => {
-        // Reload videos from server to get the latest state
-        // The backend should have already added it to the library
-        await loadAvailableVideos();
-        showToast(`Downloaded: ${dl.title || dl.filename}`, 'success');
+        // Add video to downloadedVideos map
+        const videoId = dl.videoId || extractVideoId(dl.url) || dl.filename?.replace('.mp4', '');
+        if (videoId) {
+          const localUrl = dl.localUrl || await getVideoFromDB(videoId);
+          if (localUrl) {
+            const metadata = await getVideoMetadataFromDB(videoId);
+            setDownloadedVideos(prev => {
+              const newMap = new Map(prev);
+              const filename = `${videoId}.mp4`;
+              newMap.set(filename, {
+                filename: filename,
+                title: dl.title || metadata?.title || `Video ${videoId}`,
+                url: localUrl,
+                sourceUrl: dl.url || `https://www.youtube.com/watch?v=${videoId}`,
+                size: null, // Size not available from IndexedDB
+                duration: metadata?.duration || null,
+                defaultTrimStart: 0,
+                defaultTrimEnd: 0,
+                defaultCropX: 0,
+                defaultCropY: 0,
+                defaultCropWidth: 100,
+                defaultCropHeight: 100,
+                localUrl: true // Flag to indicate it's from IndexedDB
+              });
+              saveLibraryMetadata(newMap);
+              return newMap;
+            });
+          }
+        }
+        showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
       };
 
       const handleDeleteVideo = async (video) => {
