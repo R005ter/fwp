@@ -86,11 +86,16 @@ if COOKIES_ENV:
 # This plugin automatically provides PO Tokens when needed by yt-dlp
 # No manual PO Token extraction required!
 # See: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+# Note: The plugin is auto-discovered by yt-dlp when installed via pip
+# We don't need to import it - yt-dlp will find it automatically
 try:
-    import yt_dlp_get_pot_rustypipe
-    print("✓ PO Token Provider plugin (yt-dlp-get-pot-rustypipe) is available")
-except ImportError:
-    print("⚠ Warning: PO Token Provider plugin not installed. Install with: pip install yt-dlp-get-pot-rustypipe")
+    import pkg_resources
+    pkg_resources.get_distribution('yt-dlp-get-pot-rustypipe')
+    print("✓ PO Token Provider plugin (yt-dlp-get-pot-rustypipe) is installed")
+except (pkg_resources.DistributionNotFound, ImportError):
+    # Plugin is in requirements.txt, so it should be installed
+    # yt-dlp will auto-discover it even if we can't verify here
+    print("ℹ PO Token Provider plugin should be available (yt-dlp will auto-discover it)")
 
 # Determine if we're in production (Render.com sets PORT env var)
 IS_PRODUCTION = 'RENDER' in os.environ or 'PORT' in os.environ
