@@ -198,7 +198,9 @@
             React.createElement('button', {
               type: 'button',
               onClick: () => {
-                window.location.href = `${API_BASE}/api/auth/google`;
+                // Pass the frontend URL so OAuth can redirect back to the correct port
+                const frontendUrl = window.location.origin;
+                window.location.href = `${API_BASE}/api/auth/google?frontend_url=${encodeURIComponent(frontendUrl)}`;
               },
               className: 'w-full bg-white hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg font-medium text-base transition flex items-center justify-center gap-3 border border-gray-300'
             },
@@ -1438,7 +1440,52 @@
         };
       }, []);
 
-      return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col' },
+      // Compute filtered videos (only active ones) before rendering
+      let filteredVideos = [];
+      let activeVideos = [];
+      
+      try {
+        filteredVideos = videos.length === 0 ? [] : videos.filter(video => {
+          try {
+            // If duration is 0 or not set, show the video (it's still loading)
+            if (!video.duration || video.duration === 0) {
+              return true;
+            }
+            
+            const trimStart = video.trimStart || 0;
+            const trimEnd = video.trimEnd || 0;
+            const videoTime = (masterTime || 0) - (video.offset || 0);
+            const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+            
+            // Show if currently playing (within trimmed duration)
+            return videoTime >= 0 && videoTime <= trimmedDuration;
+          } catch (err) {
+            console.error('Error filtering video:', video, err);
+            return false;
+          }
+        });
+
+        // Count active videos for header
+        activeVideos = videos.filter(video => {
+          try {
+            if (!video.duration || video.duration === 0) return false;
+            const trimStart = video.trimStart || 0;
+            const trimEnd = video.trimEnd || 0;
+            const videoTime = (masterTime || 0) - (video.offset || 0);
+            const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+            return videoTime >= 0 && videoTime <= trimmedDuration;
+          } catch (err) {
+            return false;
+          }
+        });
+      } catch (err) {
+        console.error('Error computing filtered videos:', err);
+        filteredVideos = videos || [];
+        activeVideos = [];
+      }
+
+      try {
+        return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col' },
         // Portrait mode warning
         isPortrait && React.createElement('div', { className: 'bg-yellow-600 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center' },
           '📱 Tip: Rotate to landscape for the best editing experience!'
@@ -1630,16 +1677,7 @@
         React.createElement('div', { className: 'mb-4' },
           React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-2 gap-2' },
             React.createElement('h2', { className: 'font-semibold text-gray-300 text-sm md:text-base' }, 
-              (() => {
-                const activeVideos = videos.filter(video => {
-                  const trimStart = video.trimStart || 0;
-                  const trimEnd = video.trimEnd || 0;
-                  const videoTime = masterTime - video.offset;
-                  const trimmedDuration = video.duration - trimStart - trimEnd;
-                  return videoTime >= 0 && videoTime <= trimmedDuration;
-                });
-                return `Video Grid (${activeVideos.length} playing / ${videos.length} total)`;
-              })()
+              `Video Grid (${activeVideos.length} playing / ${videos.length} total)`
             ),
             React.createElement('div', { className: 'flex items-center gap-2 md:gap-3' },
               React.createElement('span', { className: 'text-xs text-gray-400 hidden sm:inline' }, 'Grid Height:'),
@@ -1669,27 +1707,19 @@
               alignContent: 'start'
             }
           },
-          videos.length === 0 
+          videos.length === 0
             ? React.createElement('div', { className: 'col-span-full flex items-center justify-center border-2 border-dashed border-gray-600 rounded-lg' },
                 React.createElement('div', { className: 'text-center text-gray-400' },
                   React.createElement('p', { className: 'text-lg mb-2' }, 'No videos loaded'),
                   React.createElement('p', { className: 'text-sm' }, 'Use "Add from Library" to add videos to your timeline')
                 )
               )
-            : videos
-                .filter(video => {
-                  const trimStart = video.trimStart || 0;
-                  const trimEnd = video.trimEnd || 0;
-                  const videoTime = masterTime - video.offset;
-                  const trimmedDuration = video.duration - trimStart - trimEnd;
-                  return videoTime >= 0 && videoTime <= trimmedDuration; // Only show if currently playing
-                })
-                .map(video => {
+            : filteredVideos.map(video => {
                 const trimStart = video.trimStart || 0;
                 const trimEnd = video.trimEnd || 0;
                 const videoTime = masterTime - video.offset;
-                const trimmedDuration = video.duration - trimStart - trimEnd;
-                const isActive = videoTime >= 0 && videoTime <= trimmedDuration;
+                const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+                const isActive = video.duration && video.duration > 0 && videoTime >= 0 && videoTime <= trimmedDuration;
                 
                 return React.createElement('div', {
                   key: video.id,
@@ -1699,16 +1729,30 @@
                     aspectRatio: '16/9'
                   }
                 },
-                  React.createElement('video', {
-                    ref: el => videoRefs.current[video.id] = el,
-                    src: video.url,
-                    className: 'max-w-full max-h-full object-cover',
-                    style: {
-                      clipPath: `inset(${video.cropY || 0}% ${100 - (video.cropX || 0) - (video.cropWidth || 100)}% ${100 - (video.cropY || 0) - (video.cropHeight || 100)}% ${video.cropX || 0}%)`
-                    },
-                    onLoadedMetadata: (e) => handleVideoLoaded(video.id, e.target.duration),
-                    crossOrigin: 'anonymous'
-                  }),
+                  video.url 
+                    ? React.createElement('video', {
+                        ref: el => {
+                          if (el) videoRefs.current[video.id] = el;
+                        },
+                        src: video.url,
+                        className: 'max-w-full max-h-full object-cover',
+                        style: {
+                          clipPath: `inset(${video.cropY || 0}% ${100 - (video.cropX || 0) - (video.cropWidth || 100)}% ${100 - (video.cropY || 0) - (video.cropHeight || 100)}% ${video.cropX || 0}%)`
+                        },
+                        onLoadedMetadata: (e) => {
+                          if (e.target.duration) {
+                            handleVideoLoaded(video.id, e.target.duration);
+                          }
+                        },
+                        onError: (e) => {
+                          console.error(`Failed to load video ${video.name}:`, video.url, e);
+                        },
+                        crossOrigin: 'anonymous',
+                        preload: 'metadata'
+                      })
+                    : React.createElement('div', { 
+                        className: 'flex items-center justify-center h-full text-gray-500 text-sm' 
+                      }, 'No video URL'),
                   React.createElement('div', {
                     className: 'absolute top-2 left-2 px-2 py-1 rounded text-sm font-medium max-w-[60%] truncate',
                     style: { backgroundColor: video.color }
@@ -1751,7 +1795,7 @@
                       }),
                       React.createElement('span', { className: 'text-xs text-gray-400' }, 's'),
                       React.createElement('span', { className: 'text-xs text-gray-500 ml-auto' }, 
-                        `${trimmedDuration.toFixed(1)}s`)
+                        `${(trimmedDuration || 0).toFixed(1)}s`)
                     )
                   )
                 );
@@ -1810,7 +1854,7 @@
                 React.createElement('span', { className: 'text-sm' }, 'sec')
               ),
               React.createElement('div', { className: 'flex items-center gap-2' },
-                React.createElement('span', { className: 'text-sm text-gray-400' }, 'Zoom:'),
+                React.createElement('span', { className: 'text-sm text-gray-400 whitespace-nowrap' }, 'Zoom:'),
                 React.createElement('input', {
                   type: 'range',
                   min: '0.5',
@@ -1818,9 +1862,9 @@
                   step: '0.1',
                   value: zoom,
                   onChange: (e) => setZoom(parseFloat(e.target.value)),
-                  className: 'w-24'
+                  className: 'w-24 md:w-32'
                 }),
-                React.createElement('span', { className: 'text-sm' }, `${zoom.toFixed(1)}x`)
+                React.createElement('span', { className: 'text-sm text-gray-300 whitespace-nowrap w-10' }, `${zoom.toFixed(1)}x`)
               )
             )
           ),
@@ -1855,7 +1899,7 @@
             videos.map((video, index) => {
               const trimStart = video.trimStart || 0;
               const trimEnd = video.trimEnd || 0;
-              const trimmedDuration = video.duration - trimStart - trimEnd;
+              const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
               
               return React.createElement('div', {
                 key: video.id,
@@ -1887,17 +1931,26 @@
               .map(video => {
                 const trimStart = video.trimStart || 0;
                 const trimEnd = video.trimEnd || 0;
-                const trimmedDuration = video.duration - trimStart - trimEnd;
+                const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
                 return React.createElement('div', { key: video.id, className: 'flex gap-2' },
                   React.createElement('span', { style: { color: video.color } }, '●'),
                   React.createElement('span', { className: 'text-gray-400 w-16' }, formatTime(video.offset)),
                   React.createElement('span', null, video.name),
-                  React.createElement('span', { className: 'text-gray-500' }, `(${trimmedDuration.toFixed(1)}s)`)
+                  React.createElement('span', { className: 'text-gray-500' }, `(${(trimmedDuration || 0).toFixed(1)}s)`)
                 );
               })
           )
         )
       );
+      } catch (err) {
+        console.error('Error rendering ShowEditor:', err);
+        return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-4' },
+          React.createElement('h1', { className: 'text-red-500 text-xl mb-4' }, 'Error in Show Editor'),
+          React.createElement('pre', { className: 'bg-gray-800 p-4 rounded overflow-auto' }, 
+            err.message + '\n' + err.stack
+          )
+        );
+      }
     };
 
     // ======================
@@ -1957,6 +2010,13 @@
         }
       }, [authenticated]);
 
+      // Reload library when returning to dashboard
+      React.useEffect(() => {
+        if (authenticated && currentView === 'dashboard') {
+          loadAvailableVideos();
+        }
+      }, [currentView, authenticated]);
+
       const checkAuth = async () => {
         try {
           const res = await fetch(`${API_BASE}/api/auth/me`, {
@@ -2010,6 +2070,14 @@
       };
 
       const loadSessionsList = async () => {
+        // Only load from server if authenticated
+        if (!authenticated) {
+          // Not authenticated - use localStorage (though user shouldn't see this)
+          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+          setSavedSessions(sessions);
+          return;
+        }
+        
         try {
           const res = await fetch(`${API_BASE}/api/shows`, {
             credentials: 'include'
@@ -2024,19 +2092,28 @@
               videos: s.data.videos || []
             })));
           } else {
-            // Fallback to localStorage if server fails
-            const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-            setSavedSessions(sessions);
+            // Server error - show empty (don't fallback to localStorage for authenticated users)
+            console.error('Failed to load shows from server:', res.status);
+            setSavedSessions([]);
           }
         } catch (err) {
           console.error('Failed to load shows from server:', err);
-          // Fallback to localStorage
-          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-          setSavedSessions(sessions);
+          // Network error - show empty (don't fallback to localStorage for authenticated users)
+          setSavedSessions([]);
         }
       };
 
       const loadAvailableVideos = async () => {
+        // Only load from server if authenticated
+        if (!authenticated) {
+          // Not authenticated - use localStorage (though user shouldn't see this)
+          const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+          const videoMap = new Map();
+          // Can't load video files without server, so just return empty
+          setDownloadedVideos(videoMap);
+          return;
+        }
+        
         try {
           // Load videos from server
           const videosRes = await fetch(`${API_BASE}/api/videos`, {
@@ -2056,13 +2133,11 @@
               serverLibrary = await libraryRes.json();
             }
           } catch (e) {
-            console.warn('Failed to load library from server, using fallback');
+            console.warn('Failed to load library from server:', e);
           }
           
-          // Fallback to localStorage if server library is empty
-          if (Object.keys(serverLibrary).length === 0) {
-            serverLibrary = JSON.parse(localStorage.getItem('fwp_library') || '{}');
-          }
+          // For authenticated users, don't fallback to localStorage
+          // Empty library is fine - it means user hasn't configured any videos yet
           
           const videoMap = new Map();
           serverVideos.forEach(video => {
@@ -2239,22 +2314,11 @@
         showToast(`Deleted show "${name}"`, 'success');
       };
 
-      const handleDownloadComplete = (dl) => {
-        setDownloadedVideos(prev => {
-          const newMap = new Map(prev);
-          newMap.set(dl.filename, {
-            filename: dl.filename,
-            title: dl.title || dl.filename,
-            url: `${API_BASE}/videos/${dl.filename}`,
-            sourceUrl: dl.url,
-            size: 0,
-            defaultTrimStart: 0,
-            defaultTrimEnd: 0
-          });
-          saveLibraryMetadata(newMap);
-          return newMap;
-        });
-        showToast(`Downloaded: ${dl.title}`, 'success');
+      const handleDownloadComplete = async (dl) => {
+        // Reload videos from server to get the latest state
+        // The backend should have already added it to the library
+        await loadAvailableVideos();
+        showToast(`Downloaded: ${dl.title || dl.filename}`, 'success');
       };
 
       const handleDeleteVideo = async (video) => {
@@ -2278,13 +2342,58 @@
         }
       };
 
-      const handleSaveVideoSettings = (filename, updates) => {
+      const handleSaveVideoSettings = async (filename, updates) => {
         setDownloadedVideos(prev => {
           const newMap = new Map(prev);
           const existing = newMap.get(filename);
           if (existing) {
-            newMap.set(filename, { ...existing, ...updates });
-            saveLibraryMetadata(newMap);
+            const updated = { ...existing, ...updates };
+            newMap.set(filename, updated);
+            
+            // Prepare metadata
+            const metadata = {
+              title: updated.title,
+              sourceUrl: updated.sourceUrl,
+              duration: updated.duration,
+              defaultTrimStart: updated.defaultTrimStart || 0,
+              defaultTrimEnd: updated.defaultTrimEnd || 0,
+              defaultCropX: updated.defaultCropX || 0,
+              defaultCropY: updated.defaultCropY || 0,
+              defaultCropWidth: updated.defaultCropWidth || 100,
+              defaultCropHeight: updated.defaultCropHeight || 100
+            };
+            
+            // Save this specific video's metadata to server
+            if (authenticated) {
+              fetch(`${API_BASE}/api/library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ filename, metadata })
+              })
+              .then(res => {
+                if (!res.ok) {
+                  return res.json().then(err => {
+                    throw new Error(err.error || `Server error: ${res.status}`);
+                  });
+                }
+                return res.json();
+              })
+              .then(data => {
+                if (data.success) {
+                  console.log('Video settings saved successfully');
+                }
+              })
+              .catch(err => {
+                console.error('Failed to save video settings:', err);
+                showToast(`Failed to save settings: ${err.message}`, 'error');
+              });
+            }
+            
+            // Also save to localStorage as backup
+            const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+            libraryData[filename] = metadata;
+            localStorage.setItem('fwp_library', JSON.stringify(libraryData));
           }
           return newMap;
         });
@@ -2548,8 +2657,19 @@
       );
     };
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(React.createElement(FireworksPlanner));
+    try {
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(React.createElement(FireworksPlanner));
+    } catch (error) {
+      console.error('Failed to render app:', error);
+      document.getElementById('root').innerHTML = `
+        <div style="padding: 20px; color: red;">
+          <h1>Error Loading Application</h1>
+          <p>${error.message}</p>
+          <pre>${error.stack}</pre>
+        </div>
+      `;
+    }
   </script>
 </body>
 </html>

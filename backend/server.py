@@ -9,14 +9,22 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
 from authlib.integrations.flask_client import OAuth
 from database import (
     init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth,
     save_show, get_user_shows, delete_show,
-    save_library_metadata, get_user_library, delete_library_item
+    save_library_metadata, get_user_library, delete_library_item,
+    get_video_by_youtube_url, get_video_by_filename, create_video,
+    add_video_to_library, remove_video_from_library,
+    get_video_reference_count, cleanup_orphaned_videos
 )
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 # Use environment variable for secret key in production, generate random one for dev
@@ -101,12 +109,16 @@ def run_ytdlp(video_id, url):
     """Run yt-dlp in a subprocess and track progress"""
     output_path = VIDEOS_DIR / f"{video_id}.mp4"
     
+    # Preserve existing download info (youtube_url, user_id) if present
+    existing_info = downloads.get(video_id, {})
     downloads[video_id] = {
         "status": "downloading",
         "progress": 0,
         "title": "Fetching...",
         "filename": None,
-        "error": None
+        "error": None,
+        "youtube_url": existing_info.get("youtube_url", url),
+        "user_id": existing_info.get("user_id")
     }
     
     try:
@@ -180,11 +192,42 @@ def run_ytdlp(video_id, url):
         if process.returncode == 0:
             # Check if the merged mp4 file exists
             if output_path.exists():
-                downloads[video_id]["filename"] = output_path.name
+                filename = output_path.name
+                file_size = output_path.stat().st_size
+                downloads[video_id]["filename"] = filename
                 downloads[video_id]["status"] = "complete"
                 downloads[video_id]["progress"] = 100
-                print(f"[{video_id}] Download complete: {output_path.name}")
-                print(f"[{video_id}] File size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+                print(f"[{video_id}] Download complete: {filename}")
+                print(f"[{video_id}] File size: {file_size / 1024 / 1024:.2f} MB")
+                
+                # Register video in shared storage and add to user's library
+                youtube_url = downloads[video_id].get("youtube_url")
+                title = downloads[video_id].get("title", filename)
+                user_id = downloads[video_id].get("user_id")
+                
+                if youtube_url and user_id:
+                    try:
+                        # Check if video already exists (shouldn't happen, but just in case)
+                        existing = get_video_by_youtube_url(youtube_url)
+                        if existing:
+                            video_db_id = existing['id']
+                            print(f"[{video_id}] Video already in shared storage, using existing entry")
+                        else:
+                            # Create new video entry
+                            video_db_id = create_video(filename, youtube_url, title, file_size)
+                            print(f"[{video_id}] Video registered in shared storage (ID: {video_db_id})")
+                        
+                        # Add to user's library
+                        if video_db_id:
+                            add_video_to_library(user_id, video_db_id, {
+                                "title": title,
+                                "sourceUrl": youtube_url
+                            })
+                            print(f"[{video_id}] Video added to user's library")
+                    except Exception as e:
+                        print(f"[{video_id}] Error registering video: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
             else:
                 downloads[video_id]["status"] = "error"
                 downloads[video_id]["error"] = "Merged file not found after download"
@@ -217,12 +260,40 @@ def start_download():
     if "youtube.com" not in url and "youtu.be" not in url:
         return jsonify({"error": "Please provide a YouTube URL"}), 400
     
+    # Check if video already exists in shared storage
+    existing_video = get_video_by_youtube_url(url)
+    if existing_video:
+        # Video already downloaded - check if file still exists
+        filepath = VIDEOS_DIR / existing_video['filename']
+        if filepath.exists():
+            # Video exists, return immediately
+            user_id = get_current_user_id()
+            # Add to user's library if not already there
+            video_db_id = existing_video['id']
+            # Check if user already has it
+            user_lib = get_user_library(user_id)
+            if existing_video['filename'] not in user_lib:
+                # Add to library with default metadata
+                add_video_to_library(user_id, video_db_id, {
+                    "title": existing_video['title'] or existing_video['filename'],
+                    "sourceUrl": url
+                })
+            
+            return jsonify({
+                "id": "existing",
+                "status": "complete",
+                "filename": existing_video['filename'],
+                "title": existing_video['title'],
+                "message": "Video already downloaded"
+            })
+    
     video_id = str(uuid.uuid4())[:8]
     user_id = get_current_user_id()
     
-    # Store user_id with download for tracking
+    # Store user_id and URL with download for tracking
     downloads[video_id] = {
         "user_id": user_id,
+        "youtube_url": url,
         "status": "starting",
         "progress": 0,
         "title": "Fetching...",
@@ -257,7 +328,7 @@ def get_download_status(video_id):
 
 @app.route("/api/videos", methods=["GET"])
 def list_videos():
-    """List all downloaded videos (shared across users, but metadata is per-user)"""
+    """List videos in user's library (only shows videos the user has added)"""
     auth_error = require_auth()
     if auth_error:
         return auth_error
@@ -266,58 +337,80 @@ def list_videos():
     user_library = get_user_library(user_id)
     
     videos = []
-    for f in VIDEOS_DIR.glob("*"):
-        if f.suffix.lower() in [".mp4", ".webm", ".mkv", ".mov", ".avi"]:
-            # Try to find title from downloads dict or user library
-            video_id = f.stem
-            title = downloads.get(video_id, {}).get("title", None)
-            
-            # Check user's library metadata first
-            if f.name in user_library:
-                title = user_library[f.name].get("title", title)
-            
-            if not title:
-                title = f.stem
-            
+    # Only show videos that are in the user's library
+    for filename, metadata in user_library.items():
+        filepath = VIDEOS_DIR / filename
+        if filepath.exists():
             videos.append({
-                "id": video_id,
-                "filename": f.name,
-                "title": title,
-                "size": f.stat().st_size
+                "id": filepath.stem,
+                "filename": filename,
+                "title": metadata.get("title", filename),
+                "size": filepath.stat().st_size
             })
+    
     return jsonify(videos)
 
 
 @app.route("/api/videos/<filename>", methods=["DELETE"])
 def delete_video(filename):
-    """Delete a video file (and any related audio files)"""
+    """Remove video from user's library (only deletes file if no other users have it)"""
     auth_error = require_auth()
     if auth_error:
         return auth_error
     
     user_id = get_current_user_id()
-    files_deleted = []
     
-    # Delete the specified file
-    filepath = VIDEOS_DIR / filename
-    if filepath.exists():
-        filepath.unlink()
-        files_deleted.append(filename)
+    # Remove from user's library
+    removed = remove_video_from_library(user_id, filename)
     
-    # Also try to delete related files (e.g., .f137.mp4 and .f140.m4a pairs)
-    # Extract base ID without format code
-    base_id = filename.split('.')[0]
-    for related_file in VIDEOS_DIR.glob(f"{base_id}.*"):
-        if related_file.name != filename and related_file.exists():
-            related_file.unlink()
-            files_deleted.append(related_file.name)
+    if not removed:
+        return jsonify({"error": "Video not found in your library"}), 404
     
-    # Also delete from user's library metadata
-    delete_library_item(user_id, filename)
+    # Check if any other users still have this video
+    video = get_video_by_filename(filename)
+    if video:
+        ref_count = get_video_reference_count(video['id'])
+        
+        if ref_count == 0:
+            # No other users have it - delete the file
+            filepath = VIDEOS_DIR / filename
+            files_deleted = []
+            
+            if filepath.exists():
+                filepath.unlink()
+                files_deleted.append(filename)
+            
+            # Also try to delete related files
+            base_id = filename.split('.')[0]
+            for related_file in VIDEOS_DIR.glob(f"{base_id}.*"):
+                if related_file.name != filename and related_file.exists():
+                    related_file.unlink()
+                    files_deleted.append(related_file.name)
+            
+            # Delete from videos table (CASCADE will clean up library references)
+            from database import get_db
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM videos WHERE id = ?', (video['id'],))
+            conn.commit()
+            conn.close()
+            
+            return jsonify({
+                "success": True,
+                "deleted_from_library": True,
+                "file_deleted": True,
+                "deleted_files": files_deleted,
+                "message": "Video removed from your library and deleted (no other users had it)"
+            })
+        else:
+            return jsonify({
+                "success": True,
+                "deleted_from_library": True,
+                "file_deleted": False,
+                "message": f"Video removed from your library (still used by {ref_count} other user(s))"
+            })
     
-    if files_deleted:
-        return jsonify({"success": True, "deleted": files_deleted})
-    return jsonify({"error": "File not found"}), 404
+    return jsonify({"success": True, "deleted_from_library": True})
 
 
 @app.route("/videos/<filename>")
@@ -406,19 +499,43 @@ def get_current_user():
 @app.route("/api/auth/google", methods=["GET"])
 def google_login():
     """Initiate Google OAuth login"""
-    if not google:
-        return jsonify({"error": "Google OAuth not configured"}), 503
+    # Get frontend URL for error redirects
+    frontend_url = request.args.get('frontend_url') or request.headers.get('Referer')
+    if frontend_url:
+        try:
+            parsed = urlparse(frontend_url)
+            frontend_origin = f"{parsed.scheme}://{parsed.netloc}"
+        except:
+            frontend_origin = request.url_root.rstrip('/')
+    else:
+        frontend_origin = request.url_root.rstrip('/')
     
-    # Build redirect URI dynamically based on current request
-    redirect_uri = url_for('google_callback', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    if not google:
+        # Redirect to frontend with error instead of returning JSON
+        return redirect(f"{frontend_origin}#/login?error=oauth_not_configured")
+    
+    # Store the frontend URL in session for redirect after OAuth
+    session['oauth_frontend_url'] = frontend_origin
+    
+    try:
+        # Build redirect URI dynamically based on current request
+        redirect_uri = url_for('google_callback', _external=True)
+        return google.authorize_redirect(redirect_uri)
+    except Exception as e:
+        print(f"OAuth redirect error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return redirect(f"{frontend_origin}#/login?error=oauth_error")
 
 
 @app.route("/api/auth/google/callback", methods=["GET"])
 def google_callback():
     """Handle Google OAuth callback"""
+    # Get frontend URL from session (set during login initiation)
+    frontend_url = session.pop('oauth_frontend_url', None) or request.url_root.rstrip('/')
+    
     if not google:
-        return redirect(f"{request.url_root}#/login?error=oauth_not_configured")
+        return redirect(f"{frontend_url}#/login?error=oauth_not_configured")
     
     try:
         token = google.authorize_access_token()
@@ -431,7 +548,7 @@ def google_callback():
         )
         
         if user_info_response.status_code != 200:
-            return redirect(f"{request.url_root}#/login?error=oauth_failed")
+            return redirect(f"{frontend_url}#/login?error=oauth_failed")
         
         user_info = user_info_response.json()
         
@@ -442,13 +559,14 @@ def google_callback():
         picture = user_info.get('picture')
         
         if not google_id:
-            return redirect(f"{request.url_root}#/login?error=oauth_failed")
+            return redirect(f"{frontend_url}#/login?error=oauth_failed")
         
         # Check if user already exists
         user = get_user_by_oauth('google', google_id)
         
         if not user:
             # Create new user
+            print(f"Creating new Google OAuth user: {name} ({email}), Google ID: {google_id}")
             user = create_user(
                 username=name,
                 email=email,
@@ -458,20 +576,31 @@ def google_callback():
             )
             
             if not user:
-                return redirect(f"{request.url_root}#/login?error=user_creation_failed")
+                print(f"Failed to create user. This might be because:")
+                print(f"  - Username '{name}' already exists")
+                print(f"  - Google ID '{google_id}' already exists")
+                print(f"  - Email '{email}' might conflict")
+                
+                # Check if OAuth ID already exists (user already created)
+                existing_oauth = get_user_by_oauth('google', google_id)
+                if existing_oauth:
+                    print(f"User already exists with this Google ID, using existing account")
+                    user = existing_oauth
+                else:
+                    return redirect(f"{frontend_url}#/login?error=user_creation_failed")
         
         # Set session
         session['user_id'] = user['id']
         session['username'] = user['username']
         
-        # Redirect to frontend with success
-        return redirect(f"{request.url_root}#/dashboard")
+        # Redirect to frontend URL
+        return redirect(f"{frontend_url}#/dashboard")
         
     except Exception as e:
         print(f"Google OAuth error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return redirect(f"{request.url_root}#/login?error=oauth_error")
+        return redirect(f"{frontend_url}#/login?error=oauth_error")
 
 
 # ======================
@@ -543,16 +672,50 @@ def save_library_endpoint():
     if auth_error:
         return auth_error
     
-    data = request.json
-    filename = data.get("filename")
-    metadata = data.get("metadata", {})
-    
-    if not filename:
-        return jsonify({"error": "Filename required"}), 400
-    
-    user_id = get_current_user_id()
-    save_library_metadata(user_id, filename, metadata)
-    return jsonify({"success": True})
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        filename = data.get("filename")
+        metadata = data.get("metadata", {})
+        
+        if not filename:
+            return jsonify({"error": "Filename required"}), 400
+        
+        user_id = get_current_user_id()
+        print(f"Saving library metadata for user {user_id}, filename: {filename}")
+        print(f"Metadata keys: {list(metadata.keys())}")
+        
+        result = save_library_metadata(user_id, filename, metadata)
+        
+        if result is None:
+            # Video doesn't exist in shared storage - try to create it
+            print(f"Video {filename} not found in shared storage, attempting to create entry...")
+            from pathlib import Path
+            videos_dir = Path(__file__).parent / "videos"
+            filepath = videos_dir / filename
+            
+            if filepath.exists():
+                print(f"File exists, creating video entry...")
+                file_size = filepath.stat().st_size
+                from database import create_video, add_video_to_library
+                video_id = create_video(filename, None, metadata.get("title", filename), file_size)
+                if video_id:
+                    add_video_to_library(user_id, video_id, metadata)
+                    print(f"Created video entry and added to library")
+                    return jsonify({"success": True})
+            else:
+                print(f"File {filename} does not exist in videos directory")
+                return jsonify({"error": f"Video file not found: {filename}"}), 404
+        
+        print(f"Successfully saved library metadata")
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"Error saving library metadata: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 
 @app.route("/api/library/<filename>", methods=["DELETE"])
@@ -568,6 +731,30 @@ def delete_library_endpoint(filename):
         return jsonify({"success": True})
     else:
         return jsonify({"error": "Library item not found"}), 404
+
+
+@app.route("/api/cleanup", methods=["POST"])
+def cleanup_videos():
+    """Clean up orphaned videos (videos with no library references)"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    deleted_files = cleanup_orphaned_videos()
+    
+    # Also delete the actual files
+    files_deleted = []
+    for filename in deleted_files:
+        filepath = VIDEOS_DIR / filename
+        if filepath.exists():
+            filepath.unlink()
+            files_deleted.append(filename)
+    
+    return jsonify({
+        "success": True,
+        "orphaned_videos_removed": len(deleted_files),
+        "files_deleted": files_deleted
+    })
 
 
 @app.route("/api/health")
