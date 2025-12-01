@@ -49,15 +49,23 @@
       : window.location.origin;
 
     // ======================
-    // Client-Side YouTube Downloader (Invidious API + IndexedDB)
+    // Client-Side YouTube Downloader (Multiple Methods + IndexedDB)
     // ======================
     
-    // Invidious instances (fallback if one is down)
+    // Piped instances (more reliable alternative to Invidious)
+    const PIPED_INSTANCES = [
+      'https://pipedapi.kavin.rocks',
+      'https://api-piped.mha.fi',
+      'https://pipedapi.tokhmi.xyz',
+      'https://piped-api.garudalinux.org',
+      'https://pipedapi.osphost.fi'
+    ];
+    
+    // Invidious instances (fallback)
     const INVIDIOUS_INSTANCES = [
       'https://invidious.flokinet.to',
       'https://invidious.io.lol',
       'https://invidious.osi.kr',
-      'https://invidious.privacyredirect.com',
       'https://yewtu.be'
     ];
     
@@ -159,15 +167,14 @@
       });
     }
     
-    // Download video via Invidious API
-    async function downloadViaInvidious(videoId, onProgress) {
-      // Try each Invidious instance until one works
-      for (const instance of INVIDIOUS_INSTANCES) {
+    // Download video via Piped API (preferred method)
+    async function downloadViaPiped(videoId, onProgress) {
+      for (const instance of PIPED_INSTANCES) {
         try {
-          console.log(`Trying Invidious instance: ${instance}`);
+          console.log(`Trying Piped instance: ${instance}`);
           
           // Get video info
-          const infoResponse = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+          const infoResponse = await fetch(`${instance}/streams/${videoId}`, {
             headers: { 'Accept': 'application/json' }
           });
           
@@ -177,31 +184,34 @@
           
           const videoInfo = await infoResponse.json();
           
-          // Find best quality video format
-          const formats = videoInfo.formatStreams || videoInfo.adaptiveFormats || [];
-          const videoFormats = formats.filter(f => 
-            f.type && (f.type.includes('video/mp4') || f.type.includes('video/webm'))
-          );
-          
-          if (videoFormats.length === 0) {
-            throw new Error('No video formats available');
+          if (!videoInfo.videoStreams || videoInfo.videoStreams.length === 0) {
+            throw new Error('No video streams available');
           }
           
-          // Sort by quality/bitrate (best first)
-          videoFormats.sort((a, b) => {
-            const aQuality = a.quality || a.bitrate || 0;
-            const bQuality = b.quality || b.bitrate || 0;
+          // Find best quality video format
+          const videoStreams = videoInfo.videoStreams.filter(s => 
+            s.format === 'mp4' || s.format === 'webm'
+          );
+          
+          if (videoStreams.length === 0) {
+            throw new Error('No compatible video formats');
+          }
+          
+          // Sort by quality (best first)
+          videoStreams.sort((a, b) => {
+            const aQuality = parseInt(a.quality?.replace('p', '') || '0', 10);
+            const bQuality = parseInt(b.quality?.replace('p', '') || '0', 10);
             return bQuality - aQuality;
           });
           
-          const bestFormat = videoFormats[0];
-          const videoUrl = bestFormat.url || bestFormat.src;
+          const bestStream = videoStreams[0];
+          const videoUrl = bestStream.url;
           
           if (!videoUrl) {
             throw new Error('No video URL found');
           }
           
-          console.log(`Downloading from: ${instance}`);
+          console.log(`Downloading from Piped: ${instance}`);
           
           // Download the video with progress tracking
           const videoResponse = await fetch(videoUrl);
@@ -238,6 +248,99 @@
           // Save to IndexedDB
           await saveVideoToDB(videoId, blob, {
             title: videoInfo.title || `Video ${videoId}`,
+            duration: videoInfo.duration || 0,
+            thumbnail: videoInfo.thumbnailUrl
+          });
+          
+          return {
+            success: true,
+            videoId,
+            title: videoInfo.title || `Video ${videoId}`,
+            blob,
+            localUrl: URL.createObjectURL(blob),
+            instance: `Piped (${instance})`
+          };
+          
+        } catch (error) {
+          console.warn(`Piped instance ${instance} failed:`, error.message);
+          continue;
+        }
+      }
+      
+      throw new Error('All Piped instances failed');
+    }
+    
+    // Download video via Invidious API (fallback)
+    async function downloadViaInvidious(videoId, onProgress) {
+      for (const instance of INVIDIOUS_INSTANCES) {
+        try {
+          console.log(`Trying Invidious instance: ${instance}`);
+          
+          const infoResponse = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (!infoResponse.ok) {
+            throw new Error(`HTTP ${infoResponse.status}`);
+          }
+          
+          const videoInfo = await infoResponse.json();
+          const formats = videoInfo.formatStreams || videoInfo.adaptiveFormats || [];
+          const videoFormats = formats.filter(f => 
+            f.type && (f.type.includes('video/mp4') || f.type.includes('video/webm'))
+          );
+          
+          if (videoFormats.length === 0) {
+            throw new Error('No video formats available');
+          }
+          
+          videoFormats.sort((a, b) => {
+            const aQuality = a.quality || a.bitrate || 0;
+            const bQuality = b.quality || b.bitrate || 0;
+            return bQuality - aQuality;
+          });
+          
+          const bestFormat = videoFormats[0];
+          const videoUrl = bestFormat.url || bestFormat.src;
+          
+          if (!videoUrl) {
+            throw new Error('No video URL found');
+          }
+          
+          console.log(`Downloading from Invidious: ${instance}`);
+          
+          const videoResponse = await fetch(videoUrl);
+          if (!videoResponse.ok) {
+            throw new Error(`Download failed: HTTP ${videoResponse.status}`);
+          }
+          
+          const contentLength = parseInt(videoResponse.headers.get('Content-Length') || '0', 10);
+          const reader = videoResponse.body.getReader();
+          
+          let receivedLength = 0;
+          const chunks = [];
+          
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            chunks.push(value);
+            receivedLength += value.length;
+            
+            if (onProgress && contentLength > 0) {
+              const percentage = (receivedLength / contentLength) * 100;
+              onProgress({
+                loaded: receivedLength,
+                total: contentLength,
+                percentage: Math.min(percentage, 100)
+              });
+            }
+          }
+          
+          const blob = new Blob(chunks, { type: 'video/mp4' });
+          
+          await saveVideoToDB(videoId, blob, {
+            title: videoInfo.title || `Video ${videoId}`,
             duration: videoInfo.lengthSeconds || 0,
             thumbnail: videoInfo.videoThumbnails?.[0]?.url
           });
@@ -248,20 +351,19 @@
             title: videoInfo.title || `Video ${videoId}`,
             blob,
             localUrl: URL.createObjectURL(blob),
-            instance
+            instance: `Invidious (${instance})`
           };
           
         } catch (error) {
-          console.warn(`Instance ${instance} failed:`, error.message);
-          // Try next instance
+          console.warn(`Invidious instance ${instance} failed:`, error.message);
           continue;
         }
       }
       
-      throw new Error('All Invidious instances failed. Please try again later.');
+      throw new Error('All Invidious instances failed');
     }
     
-    // Main client-side download function
+    // Main client-side download function with multiple fallbacks
     async function downloadYouTubeVideoClient(url, onProgress) {
       const videoId = extractVideoId(url);
       
@@ -282,8 +384,23 @@
         };
       }
       
-      // Download via Invidious
-      return await downloadViaInvidious(videoId, onProgress);
+      // Try Piped first (most reliable)
+      try {
+        console.log('Attempting download via Piped API...');
+        return await downloadViaPiped(videoId, onProgress);
+      } catch (pipedError) {
+        console.warn('Piped download failed, trying Invidious...', pipedError.message);
+        
+        // Fallback to Invidious
+        try {
+          return await downloadViaInvidious(videoId, onProgress);
+        } catch (invidiousError) {
+          console.warn('Invidious download failed, falling back to server...', invidiousError.message);
+          
+          // Final fallback: server-side download (if available)
+          throw new Error('Client-side download failed. Please ensure you have cookies configured for server-side downloads, or try again later.');
+        }
+      }
     }
 
     // ======================
@@ -593,9 +710,49 @@
             throw new Error(result.error || 'Download failed');
           }
         } catch (err) {
-          console.error('Download error:', err);
+          console.error('Client-side download error:', err);
+          
+          // Offer server-side fallback
+          const useServer = confirm(
+            `Client-side download failed: ${err.message}\n\n` +
+            `Would you like to try server-side download instead?\n` +
+            `(Requires cookies to be configured)`
+          );
+          
+          if (useServer) {
+            // Fall back to server-side download
+            try {
+              const res = await fetch(`${API_BASE}/api/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ url: youtubeUrl })
+              });
+              
+              const data = await res.json();
+              
+              if (data.error) {
+                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
+                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+                return;
+              }
+              
+              // Update download tracking for server-side
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                  : dl
+              ));
+              
+              // Server-side download will be tracked via polling (existing code handles this)
+              return;
+            } catch (serverErr) {
+              console.error('Server-side download error:', serverErr);
+              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
+            }
+          }
+          
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
@@ -960,9 +1117,49 @@
             throw new Error(result.error || 'Download failed');
           }
         } catch (err) {
-          console.error('Download error:', err);
+          console.error('Client-side download error:', err);
+          
+          // Offer server-side fallback
+          const useServer = confirm(
+            `Client-side download failed: ${err.message}\n\n` +
+            `Would you like to try server-side download instead?\n` +
+            `(Requires cookies to be configured)`
+          );
+          
+          if (useServer) {
+            // Fall back to server-side download
+            try {
+              const res = await fetch(`${API_BASE}/api/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ url: youtubeUrl })
+              });
+              
+              const data = await res.json();
+              
+              if (data.error) {
+                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
+                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+                return;
+              }
+              
+              // Update download tracking for server-side
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                  : dl
+              ));
+              
+              // Server-side download will be tracked via polling (existing code handles this)
+              return;
+            } catch (serverErr) {
+              console.error('Server-side download error:', serverErr);
+              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
+            }
+          }
+          
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
@@ -1648,9 +1845,49 @@
             throw new Error(result.error || 'Download failed');
           }
         } catch (err) {
-          console.error('Download error:', err);
+          console.error('Client-side download error:', err);
+          
+          // Offer server-side fallback
+          const useServer = confirm(
+            `Client-side download failed: ${err.message}\n\n` +
+            `Would you like to try server-side download instead?\n` +
+            `(Requires cookies to be configured)`
+          );
+          
+          if (useServer) {
+            // Fall back to server-side download
+            try {
+              const res = await fetch(`${API_BASE}/api/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ url: youtubeUrl })
+              });
+              
+              const data = await res.json();
+              
+              if (data.error) {
+                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
+                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+                return;
+              }
+              
+              // Update download tracking for server-side
+              setDownloading(prev => prev.map(dl => 
+                dl.id === downloadId 
+                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                  : dl
+              ));
+              
+              // Server-side download will be tracked via polling (existing code handles this)
+              return;
+            } catch (serverErr) {
+              console.error('Server-side download error:', serverErr);
+              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
+            }
+          }
+          
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-          alert(`Download failed: ${err.message}\n\nTry again or use a different video.`);
         }
       };
 
