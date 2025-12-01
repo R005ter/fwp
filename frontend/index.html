@@ -2,9 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>🎆 Fireworks Show Planner</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* iOS Safari fixes */
+    input[type="range"] {
+      -webkit-appearance: none;
+      touch-action: pan-y;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      background: #f97316;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    /* Prevent text selection on drag elements */
+    .no-select {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    /* Better touch targets */
+    @media (max-width: 768px) {
+      button, input, select {
+        min-height: 44px; /* iOS recommended touch target */
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -111,25 +142,25 @@
       return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-6' },
         React.createElement('div', { className: 'max-w-7xl mx-auto' },
           // Header
-          React.createElement('div', { className: 'flex items-center justify-between mb-8' },
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-6 md:mb-8 gap-4' },
             React.createElement('div', null,
-              React.createElement('h1', { className: 'text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Show Planner'),
-              React.createElement('p', { className: 'text-gray-300' }, 'Plan your perfect fireworks show')
+              React.createElement('h1', { className: 'text-3xl md:text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Show Planner'),
+              React.createElement('p', { className: 'text-sm md:text-base text-gray-300' }, 'Plan your perfect fireworks show')
             ),
-            React.createElement('div', { className: 'flex gap-3' },
+            React.createElement('div', { className: 'flex flex-col sm:flex-row gap-2 w-full md:w-auto' },
               React.createElement('button', {
                 onClick: onGoToLibrary,
-                className: 'bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-bold text-lg transition shadow-lg'
+                className: 'bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg'
               }, '📚 Library'),
               React.createElement('button', {
                 onClick: onNewShow,
-                className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-lg transition shadow-lg'
+                className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg'
               }, '+ New Show')
             )
           ),
 
           // Stats Bar
-          React.createElement('div', { className: 'grid grid-cols-3 gap-4 mb-8' },
+          React.createElement('div', { className: 'grid grid-cols-3 gap-2 md:gap-4 mb-6 md:mb-8' },
             React.createElement('div', { 
               className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-purple-500/30 cursor-pointer hover:border-purple-400 transition',
               onClick: () => sortedSessions.length > 0 && onEditShow(sortedSessions[0].name)
@@ -155,7 +186,7 @@
           ),
 
           // Main Content Grid
-          React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-6' },
+          React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6' },
             // Left Side: Shows List (2/3 width on large screens)
             React.createElement('div', { className: 'lg:col-span-2' },
               React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-purple-500/30' },
@@ -1084,20 +1115,26 @@
         });
       };
 
+      const getEventX = (e) => {
+        return e.touches ? e.touches[0].clientX : e.clientX;
+      };
+
       const handleTimelineMouseDown = (e, videoId) => {
         e.stopPropagation();
+        e.preventDefault();
         const video = videos.find(v => v.id === videoId);
         setDraggingId(videoId);
-        setDragStartX(e.clientX);
+        setDragStartX(getEventX(e));
         setDragStartOffset(video.offset);
       };
 
-      const handleTimelineMouseMove = React.useCallback((e) => {
+      const handleTimelineMove = React.useCallback((e) => {
         if (!draggingId || !timelineRef.current) return;
+        e.preventDefault();
         
         const timelineWidth = timelineRef.current.offsetWidth;
         const pixelsPerSecond = (timelineWidth * zoom) / totalDuration;
-        const deltaX = e.clientX - dragStartX;
+        const deltaX = getEventX(e) - dragStartX;
         const deltaTime = deltaX / pixelsPerSecond;
         const newOffset = Math.max(0, dragStartOffset + deltaTime);
         
@@ -1106,23 +1143,30 @@
         ));
       }, [draggingId, dragStartX, dragStartOffset, zoom, totalDuration, setVideos, timelineRef]);
 
-      const handleTimelineMouseUp = React.useCallback(() => setDraggingId(null), [setDraggingId]);
+      const handleTimelineUp = React.useCallback((e) => {
+        e.preventDefault();
+        setDraggingId(null);
+      }, [setDraggingId]);
 
       React.useEffect(() => {
         if (draggingId) {
-          window.addEventListener('mousemove', handleTimelineMouseMove);
-          window.addEventListener('mouseup', handleTimelineMouseUp);
+          window.addEventListener('mousemove', handleTimelineMove);
+          window.addEventListener('mouseup', handleTimelineUp);
+          window.addEventListener('touchmove', handleTimelineMove, { passive: false });
+          window.addEventListener('touchend', handleTimelineUp, { passive: false });
           return () => {
-            window.removeEventListener('mousemove', handleTimelineMouseMove);
-            window.removeEventListener('mouseup', handleTimelineMouseUp);
+            window.removeEventListener('mousemove', handleTimelineMove);
+            window.removeEventListener('mouseup', handleTimelineUp);
+            window.removeEventListener('touchmove', handleTimelineMove);
+            window.removeEventListener('touchend', handleTimelineUp);
           };
         }
-      }, [draggingId, handleTimelineMouseMove, handleTimelineMouseUp]);
+      }, [draggingId, handleTimelineMove, handleTimelineUp]);
 
       const handleTimelineClick = (e) => {
         if (draggingId) return;
         const rect = timelineRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
+        const x = getEventX(e) - rect.left;
         const clickTime = (x / rect.width) * totalDuration / zoom;
         setMasterTime(Math.max(0, Math.min(clickTime, totalDuration)));
       };
@@ -1180,28 +1224,47 @@
         }
       };
 
-      return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-4 flex flex-col' },
+      // Detect mobile and portrait mode
+      const [isPortrait, setIsPortrait] = React.useState(false);
+      React.useEffect(() => {
+        const checkOrientation = () => {
+          setIsPortrait(window.innerHeight > window.innerWidth && window.innerWidth < 768);
+        };
+        checkOrientation();
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', checkOrientation);
+        return () => {
+          window.removeEventListener('resize', checkOrientation);
+          window.removeEventListener('orientationchange', checkOrientation);
+        };
+      }, []);
+
+      return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col' },
+        // Portrait mode warning
+        isPortrait && React.createElement('div', { className: 'bg-yellow-600 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center' },
+          '📱 Tip: Rotate to landscape for the best editing experience!'
+        ),
         // Header
-        React.createElement('div', { className: 'flex items-center justify-between mb-4' },
-          React.createElement('div', { className: 'flex items-center gap-4' },
+        React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-4 gap-2' },
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4' },
             React.createElement('button', {
               onClick: onBack,
-              className: 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition'
+              className: 'bg-gray-700 hover:bg-gray-600 px-4 py-3 md:py-2 rounded transition text-base md:text-sm'
             }, '← Back to Dashboard'),
             React.createElement('div', null,
-              React.createElement('h1', { className: 'text-2xl font-bold text-orange-400' }, 
+              React.createElement('h1', { className: 'text-xl md:text-2xl font-bold text-orange-400' }, 
                 showName ? `Editing: ${showName}` : 'New Show'
               )
             )
           ),
-          React.createElement('div', { className: 'flex gap-2' },
+          React.createElement('div', { className: 'flex flex-wrap gap-2' },
             React.createElement('button', {
               onClick: () => setShowYoutubeDownload(!showYoutubeDownload),
-              className: `px-4 py-2 rounded transition ${showYoutubeDownload ? 'bg-orange-600 border-2 border-orange-400' : 'bg-orange-500 hover:bg-orange-600'}`
+              className: `px-4 py-3 md:py-2 rounded transition text-base md:text-sm ${showYoutubeDownload ? 'bg-orange-600 border-2 border-orange-400' : 'bg-orange-500 hover:bg-orange-600'}`
             }, '📥 YouTube'),
             React.createElement('button', {
               onClick: () => setShowLibraryAdd(!showLibraryAdd),
-              className: 'bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition'
+              className: 'bg-green-600 hover:bg-green-700 px-4 py-3 md:py-2 rounded transition text-base md:text-sm'
             }, '+ Add from Library'),
             showName
               ? React.createElement('button', {
@@ -1366,8 +1429,8 @@
 
         // Video Grid Section
         React.createElement('div', { className: 'mb-4' },
-          React.createElement('div', { className: 'flex items-center justify-between mb-2' },
-            React.createElement('h2', { className: 'font-semibold text-gray-300' }, 
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-2 gap-2' },
+            React.createElement('h2', { className: 'font-semibold text-gray-300 text-sm md:text-base' }, 
               (() => {
                 const activeVideos = videos.filter(video => {
                   const trimStart = video.trimStart || 0;
@@ -1379,8 +1442,8 @@
                 return `Video Grid (${activeVideos.length} playing / ${videos.length} total)`;
               })()
             ),
-            React.createElement('div', { className: 'flex items-center gap-3' },
-              React.createElement('span', { className: 'text-xs text-gray-400' }, 'Grid Height:'),
+            React.createElement('div', { className: 'flex items-center gap-2 md:gap-3' },
+              React.createElement('span', { className: 'text-xs text-gray-400 hidden sm:inline' }, 'Grid Height:'),
               React.createElement('input', {
                 type: 'range',
                 min: '150',
@@ -1392,9 +1455,9 @@
                   setGridHeight(height);
                   localStorage.setItem('fwp_gridHeight', height);
                 },
-                className: 'w-32'
+                className: 'w-24 md:w-32'
               }),
-              React.createElement('span', { className: 'text-xs text-gray-300 w-16' }, `${gridHeight}px`)
+              React.createElement('span', { className: 'text-xs text-gray-300 w-12 md:w-16' }, `${gridHeight}px`)
             )
           ),
           
@@ -1462,7 +1525,7 @@
                         type: 'number',
                         value: video.offset.toFixed(1),
                         onChange: (e) => updateOffset(video.id, e.target.value),
-                        className: 'w-14 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        className: 'w-16 md:w-14 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
                         step: '0.1',
                         min: '0'
                       }),
@@ -1474,7 +1537,7 @@
                         type: 'number',
                         value: trimStart.toFixed(1),
                         onChange: (e) => updateTrimStart(video.id, e.target.value),
-                        className: 'w-12 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        className: 'w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
                         step: '0.1',
                         min: '0'
                       }),
@@ -1483,7 +1546,7 @@
                         type: 'number',
                         value: trimEnd.toFixed(1),
                         onChange: (e) => updateTrimEnd(video.id, e.target.value),
-                        className: 'w-12 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        className: 'w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
                         step: '0.1',
                         min: '0'
                       }),
@@ -1502,19 +1565,19 @@
           React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
             React.createElement('button', {
               onClick: () => setMasterTime(0),
-              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
             }, '⏮ Reset'),
             React.createElement('button', {
               onClick: () => setMasterTime(prev => Math.max(0, prev - 1)),
-              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
             }, '-1s'),
             React.createElement('button', {
               onClick: () => setIsPlaying(!isPlaying),
-              className: `px-6 py-2 rounded font-bold ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`
+              className: `px-6 py-3 md:py-2 rounded font-bold text-base md:text-sm ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`
             }, isPlaying ? '⏸ Pause' : '▶ Play'),
             React.createElement('button', {
               onClick: () => setMasterTime(prev => Math.min(totalDuration, prev + 1)),
-              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
             }, '+1s'),
             React.createElement('div', { className: 'text-xl font-mono ml-4' },
               `${formatTime(masterTime)} / ${formatTime(totalDuration)}`
@@ -1573,9 +1636,14 @@
           ),
           React.createElement('div', {
             ref: timelineRef,
-            className: 'relative bg-gray-900 rounded overflow-x-auto cursor-pointer',
-            style: { minHeight: Math.max(100, videos.length * 40 + 20) },
-            onClick: handleTimelineClick
+            className: 'relative bg-gray-900 rounded overflow-x-auto cursor-pointer touch-pan-x',
+            style: { minHeight: Math.max(100, videos.length * 50 + 20) },
+            onClick: handleTimelineClick,
+            onTouchStart: (e) => {
+              if (!draggingId) {
+                handleTimelineClick(e);
+              }
+            }
           },
             React.createElement('div', {
               className: 'absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none',
@@ -1592,15 +1660,17 @@
               
               return React.createElement('div', {
                 key: video.id,
-                className: 'absolute h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg',
+                className: 'absolute h-10 md:h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg no-select touch-none',
                 style: {
-                  top: index * 40 + 10,
+                  top: index * 50 + 10,
                   left: `${(video.offset / totalDuration) * 100 * zoom}%`,
                   width: `${(trimmedDuration / totalDuration) * 100 * zoom}%`,
                   backgroundColor: video.color,
-                  minWidth: '60px'
+                  minWidth: '60px',
+                  touchAction: 'none'
                 },
-                onMouseDown: (e) => handleTimelineMouseDown(e, video.id)
+                onMouseDown: (e) => handleTimelineMouseDown(e, video.id),
+                onTouchStart: (e) => handleTimelineMouseDown(e, video.id)
               }, `${video.name} (${trimmedDuration.toFixed(1)}s)`);
             })
           ),
