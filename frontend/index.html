@@ -2456,63 +2456,94 @@
 
       const loadAvailableVideos = async () => {
         // Only load from server if authenticated
-        if (!authenticated) {
-          // Not authenticated - use localStorage (though user shouldn't see this)
-          const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
-          const videoMap = new Map();
-          // Can't load video files without server, so just return empty
-          setDownloadedVideos(videoMap);
-          return;
+        const videoMap = new Map();
+        
+        // First, load videos from IndexedDB (client-side downloads)
+        try {
+          const db = await openVideoDB();
+          const transaction = db.transaction([STORE_NAME], 'readonly');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.getAll();
+          
+          await new Promise((resolve, reject) => {
+            request.onsuccess = () => {
+              request.result.forEach(item => {
+                const videoId = item.videoId;
+                const filename = `${videoId}.mp4`;
+                const localUrl = URL.createObjectURL(item.blob);
+                videoMap.set(filename, {
+                  filename: filename,
+                  title: item.title || `Video ${videoId}`,
+                  url: localUrl,
+                  sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+                  size: null,
+                  duration: item.duration || null,
+                  defaultTrimStart: 0,
+                  defaultTrimEnd: 0,
+                  defaultCropX: 0,
+                  defaultCropY: 0,
+                  defaultCropWidth: 100,
+                  defaultCropHeight: 100,
+                  localUrl: true
+                });
+              });
+              resolve();
+            };
+            request.onerror = () => reject(request.error);
+          });
+        } catch (err) {
+          console.warn('Failed to load videos from IndexedDB:', err);
         }
         
-        try {
-          // Load videos from server
-          const videosRes = await fetch(`${API_BASE}/api/videos`, {
-            credentials: 'include'
-          });
-          if (!videosRes.ok) throw new Error('Failed to load videos');
-          
-          const serverVideos = await videosRes.json();
-          
-          // Load library metadata from server
-          let serverLibrary = {};
+        // Also load from server if authenticated (for backward compatibility)
+        if (authenticated) {
           try {
-            const libraryRes = await fetch(`${API_BASE}/api/library`, {
+            const videosRes = await fetch(`${API_BASE}/api/videos`, {
               credentials: 'include'
             });
-            if (libraryRes.ok) {
-              serverLibrary = await libraryRes.json();
+            if (videosRes.ok) {
+              const serverVideos = await videosRes.json();
+              
+              // Load library metadata from server
+              let serverLibrary = {};
+              try {
+                const libraryRes = await fetch(`${API_BASE}/api/library`, {
+                  credentials: 'include'
+                });
+                if (libraryRes.ok) {
+                  serverLibrary = await libraryRes.json();
+                }
+              } catch (e) {
+                console.warn('Failed to load library from server:', e);
+              }
+              
+              serverVideos.forEach(video => {
+                // Only add if not already in map (IndexedDB takes precedence)
+                if (!videoMap.has(video.filename)) {
+                  const savedData = serverLibrary[video.filename] || {};
+                  videoMap.set(video.filename, {
+                    filename: video.filename,
+                    title: savedData.title || video.title || video.filename,
+                    url: `${API_BASE}/videos/${video.filename}`,
+                    sourceUrl: savedData.sourceUrl || null,
+                    size: video.size,
+                    duration: savedData.duration || null,
+                    defaultTrimStart: savedData.defaultTrimStart || 0,
+                    defaultTrimEnd: savedData.defaultTrimEnd || 0,
+                    defaultCropX: savedData.defaultCropX || 0,
+                    defaultCropY: savedData.defaultCropY || 0,
+                    defaultCropWidth: savedData.defaultCropWidth || 100,
+                    defaultCropHeight: savedData.defaultCropHeight || 100
+                  });
+                }
+              });
             }
-          } catch (e) {
-            console.warn('Failed to load library from server:', e);
+          } catch (err) {
+            console.warn('Failed to load videos from server:', err);
           }
-          
-          // For authenticated users, don't fallback to localStorage
-          // Empty library is fine - it means user hasn't configured any videos yet
-          
-          const videoMap = new Map();
-          serverVideos.forEach(video => {
-            const savedData = serverLibrary[video.filename] || {};
-            videoMap.set(video.filename, {
-              filename: video.filename,
-              title: savedData.title || video.title || video.filename,
-              url: `${API_BASE}/videos/${video.filename}`,
-              sourceUrl: savedData.sourceUrl || null,
-              size: video.size,
-              duration: savedData.duration || null,
-              defaultTrimStart: savedData.defaultTrimStart || 0,
-              defaultTrimEnd: savedData.defaultTrimEnd || 0,
-              defaultCropX: savedData.defaultCropX || 0,
-              defaultCropY: savedData.defaultCropY || 0,
-              defaultCropWidth: savedData.defaultCropWidth || 100,
-              defaultCropHeight: savedData.defaultCropHeight || 100
-            });
-          });
-          
-          setDownloadedVideos(videoMap);
-        } catch (err) {
-          console.error('Failed to load videos from backend:', err);
         }
+        
+        setDownloadedVideos(videoMap);
       };
 
       const saveLibraryMetadata = async (videos) => {
