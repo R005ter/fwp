@@ -8,10 +8,11 @@ import json
 import subprocess
 import threading
 import uuid
+import requests
 from pathlib import Path
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, Response
 from flask_cors import CORS
 from authlib.integrations.flask_client import OAuth
 from database import (
@@ -486,6 +487,246 @@ def get_download_status(video_id):
         return jsonify({"error": "Download not found"}), 404
     
     return jsonify(downloads[video_id])
+
+
+# Piped/Invidious API instances (no CORS issues when called from server)
+PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://api-piped.mha.fi',
+    'https://pipedapi.tokhmi.xyz',
+    'https://piped-api.garudalinux.org',
+    'https://pipedapi.osphost.fi'
+]
+
+INVIDIOUS_INSTANCES = [
+    'https://invidious.flokinet.to',
+    'https://invidious.io.lol',
+    'https://invidious.osi.kr',
+    'https://invidious.privacyredirect.com',
+    'https://yewtu.be'
+]
+
+
+def extract_video_id_from_url(url):
+    """Extract YouTube video ID from URL"""
+    import re
+    patterns = [
+        r'[?&]v=([^&]+)',
+        r'youtu\.be/([^?&]+)',
+        r'^([a-zA-Z0-9_-]{11})$'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def download_via_piped_api(video_id):
+    """Download video using Piped API (server-side, no CORS)"""
+    for instance in PIPED_INSTANCES:
+        try:
+            print(f"[Piped] Trying instance: {instance}")
+            # Get video info
+            info_url = f"{instance}/streams/{video_id}"
+            response = requests.get(info_url, timeout=10, headers={'Accept': 'application/json'})
+            
+            if response.status_code != 200:
+                print(f"[Piped] Instance {instance} returned {response.status_code}")
+                continue
+            
+            video_info = response.json()
+            
+            if not video_info.get('videoStreams') or len(video_info['videoStreams']) == 0:
+                print(f"[Piped] No video streams found")
+                continue
+            
+            # Find best quality video format
+            video_streams = [s for s in video_info['videoStreams'] 
+                           if s.get('format') in ['mp4', 'webm']]
+            
+            if not video_streams:
+                print(f"[Piped] No compatible formats")
+                continue
+            
+            # Sort by quality (best first)
+            video_streams.sort(key=lambda s: int(s.get('quality', '0').replace('p', '') or '0'), reverse=True)
+            best_stream = video_streams[0]
+            video_url = best_stream.get('url')
+            
+            if not video_url:
+                print(f"[Piped] No URL in stream")
+                continue
+            
+            print(f"[Piped] Found video URL, downloading from {instance}...")
+            
+            # Download the video
+            video_response = requests.get(video_url, stream=True, timeout=30)
+            if video_response.status_code != 200:
+                print(f"[Piped] Video download failed: {video_response.status_code}")
+                continue
+            
+            # Save to file
+            filename = f"{video_id}.mp4"
+            filepath = VIDEOS_DIR / filename
+            
+            total_size = int(video_response.headers.get('Content-Length', 0))
+            downloaded = 0
+            
+            with open(filepath, 'wb') as f:
+                for chunk in video_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+            
+            print(f"[Piped] Download complete: {downloaded} bytes")
+            
+            return {
+                'success': True,
+                'filename': filename,
+                'title': video_info.get('title', f'Video {video_id}'),
+                'instance': instance
+            }
+            
+        except Exception as e:
+            print(f"[Piped] Instance {instance} failed: {str(e)}")
+            continue
+    
+    return {'success': False, 'error': 'All Piped instances failed'}
+
+
+def download_via_invidious_api(video_id):
+    """Download video using Invidious API (server-side, no CORS)"""
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            print(f"[Invidious] Trying instance: {instance}")
+            # Get video info
+            info_url = f"{instance}/api/v1/videos/{video_id}"
+            response = requests.get(info_url, timeout=10)
+            
+            if response.status_code != 200:
+                print(f"[Invidious] Instance {instance} returned {response.status_code}")
+                continue
+            
+            video_info = response.json()
+            
+            # Get best format URL
+            format_urls = video_info.get('formatStreams', [])
+            if not format_urls:
+                print(f"[Invidious] No format streams found")
+                continue
+            
+            # Find best quality
+            best_format = max(format_urls, key=lambda f: int(f.get('quality', '0').replace('p', '') or '0'))
+            video_url = best_format.get('url')
+            
+            if not video_url:
+                print(f"[Invidious] No URL in format")
+                continue
+            
+            print(f"[Invidious] Found video URL, downloading from {instance}...")
+            
+            # Download the video
+            video_response = requests.get(video_url, stream=True, timeout=30)
+            if video_response.status_code != 200:
+                print(f"[Invidious] Video download failed: {video_response.status_code}")
+                continue
+            
+            # Save to file
+            filename = f"{video_id}.mp4"
+            filepath = VIDEOS_DIR / filename
+            
+            with open(filepath, 'wb') as f:
+                for chunk in video_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            print(f"[Invidious] Download complete")
+            
+            return {
+                'success': True,
+                'filename': filename,
+                'title': video_info.get('title', f'Video {video_id}'),
+                'instance': instance
+            }
+            
+        except Exception as e:
+            print(f"[Invidious] Instance {instance} failed: {str(e)}")
+            continue
+    
+    return {'success': False, 'error': 'All Invidious instances failed'}
+
+
+@app.route("/api/download-proxy", methods=["POST"])
+def download_via_proxy():
+    """Download video using Piped/Invidious APIs (server-side proxy to avoid CORS)"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    data = request.json
+    url = data.get("url")
+    
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+    
+    # Extract video ID
+    video_id = extract_video_id_from_url(url)
+    if not video_id:
+        return jsonify({"error": "Invalid YouTube URL"}), 400
+    
+    # Check if video already exists
+    existing_video = get_video_by_youtube_url(url)
+    if existing_video:
+        filepath = VIDEOS_DIR / existing_video['filename']
+        if filepath.exists():
+            user_id = get_current_user_id()
+            user_lib = get_user_library(user_id)
+            if existing_video['filename'] not in user_lib:
+                add_video_to_library(user_id, existing_video['id'], {
+                    "title": existing_video['title'] or existing_video['filename'],
+                    "sourceUrl": url
+                })
+            
+            return jsonify({
+                "id": "existing",
+                "status": "complete",
+                "filename": existing_video['filename'],
+                "title": existing_video['title'],
+                "message": "Video already downloaded"
+            })
+    
+    # Try Piped first
+    print(f"[Proxy] Attempting download via Piped API for {video_id}...")
+    result = download_via_piped_api(video_id)
+    
+    if not result['success']:
+        # Fallback to Invidious
+        print(f"[Proxy] Piped failed, trying Invidious API...")
+        result = download_via_invidious_api(video_id)
+    
+    if not result['success']:
+        return jsonify({"error": result.get('error', 'Download failed')}), 500
+    
+    # Save to database
+    filename = result['filename']
+    filepath = VIDEOS_DIR / filename
+    file_size = filepath.stat().st_size if filepath.exists() else 0
+    
+    video_db_id = create_video(url, filename, result['title'], file_size)
+    user_id = get_current_user_id()
+    add_video_to_library(user_id, video_db_id, {
+        "title": result['title'],
+        "sourceUrl": url
+    })
+    
+    return jsonify({
+        "id": "proxy_complete",
+        "status": "complete",
+        "filename": filename,
+        "title": result['title'],
+        "instance": result.get('instance', 'Unknown')
+    })
 
 
 @app.route("/api/videos", methods=["GET"])
