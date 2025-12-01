@@ -136,19 +136,20 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use mweb (mobile web) client with additional options to avoid bot detection
+        # Use web client with cookies - works better than mweb which requires PO tokens
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=mweb",  # Use mobile web client
-            "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
+            "--extractor-args", "youtube:player_client=web",  # Use web client (works better with cookies)
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # Desktop Chrome user agent
             "--referer", "https://www.youtube.com/",  # Set referer
-            "--no-check-certificate",  # Skip cert checks (sometimes helps)
         ]
         
-        # Add cookies if available
+        # Add cookies if available (required for web client to work)
         if COOKIES_FILE.exists():
             info_cmd.extend(["--cookies", str(COOKIES_FILE)])
             print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+        else:
+            print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
         info_cmd.extend([
             "--dump-json",
@@ -167,19 +168,20 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use mweb (mobile web) client with additional options to avoid bot detection
+        # Use web client with cookies - works better than mweb which requires PO tokens
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=mweb",  # Use mobile web client
-            "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
+            "--extractor-args", "youtube:player_client=web",  # Use web client (works better with cookies)
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # Desktop Chrome user agent
             "--referer", "https://www.youtube.com/",  # Set referer
-            "--no-check-certificate",  # Skip cert checks (sometimes helps)
         ]
         
-        # Add cookies if available
+        # Add cookies if available (required for web client to work)
         if COOKIES_FILE.exists():
             cmd.extend(["--cookies", str(COOKIES_FILE)])
             print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+        else:
+            print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
         
         cmd.extend([
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
