@@ -73,8 +73,12 @@ if COOKIES_ENV:
     try:
         import base64
         cookies_data = base64.b64decode(COOKIES_ENV).decode('utf-8')
+        # Verify it's in Netscape format
+        if not cookies_data.startswith('# Netscape HTTP Cookie File') and not cookies_data.startswith('# HTTP Cookie File'):
+            print("⚠ Warning: Cookies file may not be in Netscape format")
         COOKIES_FILE.write_text(cookies_data)
-        print("✓ YouTube cookies loaded from environment variable")
+        file_size = COOKIES_FILE.stat().st_size
+        print(f"✓ YouTube cookies loaded from environment variable ({file_size} bytes)")
     except Exception as e:
         print(f"⚠ Warning: Could not decode YouTube cookies from env: {e}")
 
@@ -137,10 +141,10 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Try android_embedded - sometimes works better than tv_embedded
+        # Use android client (android_embedded is not supported)
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android_embedded",  # Use Android embedded client
+            "--extractor-args", "youtube:player_client=android",  # Use Android client (not android_embedded)
             "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
@@ -169,10 +173,10 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Try android_embedded - sometimes works better than tv_embedded
+        # Use android client (android_embedded is not supported)
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android_embedded",  # Use Android embedded client
+            "--extractor-args", "youtube:player_client=android",  # Use Android client (not android_embedded)
             "--user-agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",  # Android YouTube app user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
