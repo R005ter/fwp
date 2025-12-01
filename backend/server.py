@@ -136,15 +136,15 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use web client with cookies - works better than mweb which requires PO tokens
+        # Use tv_embedded client - simpler, doesn't require challenge solving or PO tokens
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=web",  # Use web client (works better with cookies)
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # Desktop Chrome user agent
+            "--extractor-args", "youtube:player_client=tv_embedded",  # Use TV embedded client (simpler, no challenge solving)
+            "--user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",  # Android TV user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
         
-        # Add cookies if available (required for web client to work)
+        # Add cookies if available
         if COOKIES_FILE.exists():
             info_cmd.extend(["--cookies", str(COOKIES_FILE)])
             print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
@@ -168,15 +168,15 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use web client with cookies - works better than mweb which requires PO tokens
+        # Use tv_embedded client - simpler, doesn't require challenge solving or PO tokens
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=web",  # Use web client (works better with cookies)
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # Desktop Chrome user agent
+            "--extractor-args", "youtube:player_client=tv_embedded",  # Use TV embedded client (simpler, no challenge solving)
+            "--user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",  # Android TV user agent
             "--referer", "https://www.youtube.com/",  # Set referer
         ]
         
-        # Add cookies if available (required for web client to work)
+        # Add cookies if available
         if COOKIES_FILE.exists():
             cmd.extend(["--cookies", str(COOKIES_FILE)])
             print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
