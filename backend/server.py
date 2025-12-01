@@ -205,29 +205,67 @@ def run_ytdlp(video_id, url):
                 title = downloads[video_id].get("title", filename)
                 user_id = downloads[video_id].get("user_id")
                 
-                if youtube_url and user_id:
-                    try:
-                        # Check if video already exists (shouldn't happen, but just in case)
-                        existing = get_video_by_youtube_url(youtube_url)
-                        if existing:
-                            video_db_id = existing['id']
-                            print(f"[{video_id}] Video already in shared storage, using existing entry")
-                        else:
-                            # Create new video entry
-                            video_db_id = create_video(filename, youtube_url, title, file_size)
-                            print(f"[{video_id}] Video registered in shared storage (ID: {video_db_id})")
-                        
-                        # Add to user's library
+                print(f"[{video_id}] Attempting to register video:")
+                print(f"[{video_id}]   - user_id: {user_id}")
+                print(f"[{video_id}]   - youtube_url: {youtube_url}")
+                print(f"[{video_id}]   - title: {title}")
+                print(f"[{video_id}]   - filename: {filename}")
+                print(f"[{video_id}]   - file_size: {file_size}")
+                
+                if not user_id:
+                    error_msg = "No user_id found in download info"
+                    print(f"[{video_id}] ERROR: {error_msg}")
+                    downloads[video_id]["status"] = "error"
+                    downloads[video_id]["error"] = error_msg
+                    return
+                
+                if not youtube_url:
+                    error_msg = "No youtube_url found in download info"
+                    print(f"[{video_id}] ERROR: {error_msg}")
+                    downloads[video_id]["status"] = "error"
+                    downloads[video_id]["error"] = error_msg
+                    return
+                
+                try:
+                    # Check if video already exists (shouldn't happen, but just in case)
+                    existing = get_video_by_youtube_url(youtube_url)
+                    if existing:
+                        video_db_id = existing['id']
+                        print(f"[{video_id}] Video already in shared storage (ID: {video_db_id}), using existing entry")
+                    else:
+                        # Create new video entry
+                        print(f"[{video_id}] Creating new video entry in database...")
+                        video_db_id = create_video(filename, youtube_url, title, file_size)
                         if video_db_id:
-                            add_video_to_library(user_id, video_db_id, {
-                                "title": title,
-                                "sourceUrl": youtube_url
-                            })
-                            print(f"[{video_id}] Video added to user's library")
-                    except Exception as e:
-                        print(f"[{video_id}] Error registering video: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
+                            print(f"[{video_id}] ✓ Video registered in shared storage (ID: {video_db_id})")
+                        else:
+                            raise Exception("create_video returned None")
+                    
+                    # Add to user's library
+                    if video_db_id:
+                        print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
+                        add_video_to_library(user_id, video_db_id, {
+                            "title": title,
+                            "sourceUrl": youtube_url
+                        })
+                        print(f"[{video_id}] ✓ Video added to user's library successfully")
+                        
+                        # Verify it was added
+                        from database import get_user_library
+                        user_lib = get_user_library(user_id)
+                        if filename in user_lib:
+                            print(f"[{video_id}] ✓ Verified: Video appears in user's library")
+                        else:
+                            print(f"[{video_id}] ⚠ WARNING: Video not found in user's library after adding!")
+                    else:
+                        raise Exception("video_db_id is None")
+                except Exception as e:
+                    error_msg = f"Error registering video: {str(e)}"
+                    print(f"[{video_id}] ERROR: {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    downloads[video_id]["status"] = "error"
+                    downloads[video_id]["error"] = error_msg
             else:
                 downloads[video_id]["status"] = "error"
                 downloads[video_id]["error"] = "Merged file not found after download"
@@ -754,6 +792,33 @@ def cleanup_videos():
         "success": True,
         "orphaned_videos_removed": len(deleted_files),
         "files_deleted": files_deleted
+    })
+
+
+@app.route("/api/debug/downloads", methods=["GET"])
+def debug_downloads():
+    """Debug endpoint to check recent downloads and their status"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    
+    # Get all downloads for this user
+    user_downloads = {
+        vid: info for vid, info in downloads.items()
+        if info.get("user_id") == user_id
+    }
+    
+    # Get user's library
+    from database import get_user_library
+    user_library = get_user_library(user_id)
+    
+    return jsonify({
+        "user_id": user_id,
+        "downloads": user_downloads,
+        "library_count": len(user_library),
+        "library_files": list(user_library.keys())
     })
 
 
