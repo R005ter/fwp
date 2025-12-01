@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎆 Fireworks Show Planner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import React from 'https://esm.sh/react@18';
+    import ReactDOM from 'https://esm.sh/react-dom@18/client';
+    
+    // Use relative URL in production, localhost in development
+    const API_BASE = window.location.hostname === 'localhost' 
+      ? 'http://localhost:5000' 
+      : window.location.origin;
+
+    // ======================
+    // Dashboard Component
+    // ======================
+    const Dashboard = ({ 
+      onEditShow, 
+      onNewShow,
+      onGoToLibrary,
+      savedSessions, 
+      onDeleteShow, 
+      downloadedVideos,
+      onDownloadComplete 
+    }) => {
+      const [searchQuery, setSearchQuery] = React.useState('');
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            downloading.map(async (dl) => {
+              try {
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const status = await res.json();
+                return { ...dl, ...status };
+              } catch {
+                return dl;
+              }
+            })
+          );
+          
+          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => clearInterval(interval);
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        if (!youtubeUrl.trim()) return;
+        
+        try {
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          
+          if (data.error) {
+            alert(`Error: ${data.error}`);
+            return;
+          }
+          
+          setDownloading(prev => [...prev, { 
+            id: data.id, 
+            url: youtubeUrl, 
+            status: 'downloading',
+            progress: 0 
+          }]);
+          setYoutubeUrl('');
+        } catch (err) {
+          alert('Failed to start download. Is the backend running?');
+        }
+      };
+
+      const filteredSessions = savedSessions.filter(s => 
+        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const sortedSessions = [...filteredSessions].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+      );
+
+      return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-6' },
+        React.createElement('div', { className: 'max-w-7xl mx-auto' },
+          // Header
+          React.createElement('div', { className: 'flex items-center justify-between mb-8' },
+            React.createElement('div', null,
+              React.createElement('h1', { className: 'text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Show Planner'),
+              React.createElement('p', { className: 'text-gray-300' }, 'Plan your perfect fireworks show')
+            ),
+            React.createElement('div', { className: 'flex gap-3' },
+              React.createElement('button', {
+                onClick: onGoToLibrary,
+                className: 'bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-bold text-lg transition shadow-lg'
+              }, '📚 Library'),
+              React.createElement('button', {
+                onClick: onNewShow,
+                className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-lg transition shadow-lg'
+              }, '+ New Show')
+            )
+          ),
+
+          // Stats Bar
+          React.createElement('div', { className: 'grid grid-cols-3 gap-4 mb-8' },
+            React.createElement('div', { 
+              className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-purple-500/30 cursor-pointer hover:border-purple-400 transition',
+              onClick: () => sortedSessions.length > 0 && onEditShow(sortedSessions[0].name)
+            },
+              React.createElement('div', { className: 'text-3xl font-bold text-purple-400' }, savedSessions.length),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 'Total Shows')
+            ),
+            React.createElement('div', { 
+              className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-blue-500/30 cursor-pointer hover:border-blue-400 transition',
+              onClick: onGoToLibrary
+            },
+              React.createElement('div', { className: 'text-3xl font-bold text-blue-400' }, downloadedVideos.size),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 'Videos in Library')
+            ),
+            React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30' },
+              React.createElement('div', { className: 'text-3xl font-bold ' + (backendStatus?.status === 'ok' ? 'text-green-400' : 'text-red-400') }, 
+                backendStatus?.status === 'ok' ? '●' : '○'
+              ),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 
+                backendStatus?.status === 'ok' ? 'Backend Connected' : 'Backend Offline'
+              )
+            )
+          ),
+
+          // Main Content Grid
+          React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-6' },
+            // Left Side: Shows List (2/3 width on large screens)
+            React.createElement('div', { className: 'lg:col-span-2' },
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-purple-500/30' },
+                React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+                  React.createElement('h2', { className: 'text-2xl font-bold text-purple-300' }, '🎭 Your Shows'),
+                  React.createElement('input', {
+                    type: 'text',
+                    value: searchQuery,
+                    onChange: (e) => setSearchQuery(e.target.value),
+                    placeholder: 'Search shows...',
+                    className: 'bg-gray-700/50 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 w-64'
+                  })
+                ),
+
+                sortedSessions.length === 0 
+                  ? React.createElement('div', { className: 'text-center py-12' },
+                      React.createElement('div', { className: 'text-6xl mb-4' }, '🎆'),
+                      React.createElement('p', { className: 'text-xl text-gray-400 mb-2' }, 'No shows yet'),
+                      React.createElement('p', { className: 'text-sm text-gray-500 mb-6' }, 'Create your first fireworks show to get started!'),
+                      React.createElement('button', {
+                        onClick: onNewShow,
+                        className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold transition'
+                      }, '+ Create First Show')
+                    )
+                  : React.createElement('div', { className: 'space-y-3 max-h-[600px] overflow-y-auto' },
+                      sortedSessions.map(session => 
+                        React.createElement('div', {
+                          key: session.name,
+                          className: 'bg-gray-700/50 rounded-lg p-4 hover:bg-gray-700 transition cursor-pointer border border-transparent hover:border-purple-500',
+                          onClick: () => onEditShow(session.name)
+                        },
+                          React.createElement('div', { className: 'flex items-start justify-between' },
+                            React.createElement('div', { className: 'flex-1' },
+                              React.createElement('div', { className: 'flex items-center gap-3 mb-2' },
+                                React.createElement('h3', { className: 'text-xl font-bold text-white' }, session.name),
+                                React.createElement('span', { className: 'text-xs px-2 py-1 bg-purple-600 rounded' }, 
+                                  `${session.videos.length} items`
+                                )
+                              ),
+                              React.createElement('div', { className: 'text-sm text-gray-400 mb-2' },
+                                `Duration: ${session.totalDuration?.toFixed(0) || 60}s`
+                              ),
+                              React.createElement('div', { className: 'text-xs text-gray-500' },
+                                `Last modified: ${new Date(session.timestamp).toLocaleDateString()} at ${new Date(session.timestamp).toLocaleTimeString()}`
+                              )
+                            ),
+                            React.createElement('div', { className: 'flex gap-2', onClick: (e) => e.stopPropagation() },
+                              React.createElement('button', {
+                                onClick: () => onEditShow(session.name),
+                                className: 'bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm transition'
+                              }, '✏️ Edit'),
+                              React.createElement('button', {
+                                onClick: () => {
+                                  if (confirm(`Delete show "${session.name}"?`)) {
+                                    onDeleteShow(session.name);
+                                  }
+                                },
+                                className: 'bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition'
+                              }, '🗑️')
+                            )
+                          )
+                        )
+                      )
+                    )
+              )
+            ),
+
+            // Right Side: YouTube Downloader
+            React.createElement('div', { className: 'space-y-6' },
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30' },
+                React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 YouTube Downloader'),
+                backendStatus?.status === 'ok' 
+                  ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
+                      React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
+                      `Connected • yt-dlp ${backendStatus.ytdlp_version}`
+                    )
+                  : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
+                      React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
+                      'Backend offline - start server.py'
+                    ),
+                
+                React.createElement('div', { className: 'space-y-3' },
+                  React.createElement('input', {
+                    type: 'text',
+                    value: youtubeUrl,
+                    onChange: (e) => setYoutubeUrl(e.target.value),
+                    placeholder: 'Paste YouTube URL...',
+                    className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                    onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                  }),
+                  React.createElement('button', {
+                    onClick: handleYoutubeDownload,
+                    disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                    className: 'w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition font-bold'
+                  }, 'Download Video'),
+
+                  downloading.length > 0 && React.createElement('div', { className: 'space-y-2 mt-3' },
+                    downloading.map(dl => 
+                      React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                        React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                          React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                          React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                        ),
+                        React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                          React.createElement('div', {
+                            className: 'h-full bg-orange-500 transition-all',
+                            style: { width: `${dl.progress || 0}%` }
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                    React.createElement('button', {
+                      onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                      className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                    }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+                  ),
+
+                  showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeSearchQuery,
+                      onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                      placeholder: 'e.g., fireworks display...',
+                      className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      }
+                    }),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      },
+                      className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                    }, '🔍 Search on YouTube')
+                  )
+                )
+              ),
+
+              // Quick Library Preview
+              React.createElement('div', { 
+                className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-green-500/30 cursor-pointer hover:border-green-400 transition',
+                onClick: onGoToLibrary
+              },
+                React.createElement('div', { className: 'flex items-center justify-between mb-3' },
+                  React.createElement('h2', { className: 'text-xl font-bold text-green-300' }, '📚 Library'),
+                  React.createElement('span', { className: 'text-sm text-gray-400' }, `${downloadedVideos.size} videos`)
+                ),
+                React.createElement('p', { className: 'text-sm text-gray-400 mb-3' }, 'Manage your video collection'),
+                React.createElement('button', {
+                  className: 'w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition'
+                }, 'Manage Library →')
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ======================
+    // Library Management Component
+    // ======================
+    const LibraryView = ({ 
+      downloadedVideos,
+      setDownloadedVideos,
+      onBack, 
+      onEditVideo, 
+      onDeleteVideo,
+      onSaveVideoSettings,
+      onDownloadComplete
+    }) => {
+      const [searchQuery, setSearchQuery] = React.useState('');
+      const [editingVideo, setEditingVideo] = React.useState(null);
+      const [previewVideoRef, setPreviewVideoRef] = React.useState(null);
+      const [previewTime, setPreviewTime] = React.useState(0);
+      const [previewPlaying, setPreviewPlaying] = React.useState(false);
+      const [editTitle, setEditTitle] = React.useState('');
+      const [editTrimStart, setEditTrimStart] = React.useState(0);
+      const [editTrimEnd, setEditTrimEnd] = React.useState(0);
+      
+      // Crop settings (as percentages: 0-100)
+      const [editCropX, setEditCropX] = React.useState(0);
+      const [editCropY, setEditCropY] = React.useState(0);
+      const [editCropWidth, setEditCropWidth] = React.useState(100);
+      const [editCropHeight, setEditCropHeight] = React.useState(100);
+      
+      // YouTube download functionality
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      // Poll for download progress
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            downloading.map(async (dl) => {
+              try {
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const status = await res.json();
+                return { ...dl, ...status };
+              } catch {
+                return dl;
+              }
+            })
+          );
+          
+          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          
+          // Notify parent of completed downloads
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => clearInterval(interval);
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        if (!youtubeUrl.trim()) return;
+        
+        try {
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          
+          if (data.error) {
+            alert(`Error: ${data.error}`);
+            return;
+          }
+          
+          setDownloading(prev => [...prev, { 
+            id: data.id, 
+            url: youtubeUrl, 
+            status: 'downloading',
+            progress: 0 
+          }]);
+          setYoutubeUrl('');
+        } catch (err) {
+          alert('Failed to start download. Is the backend running?');
+        }
+      };
+
+      const filteredVideos = Array.from(downloadedVideos.values()).filter(v =>
+        v.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        v.filename.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const handleEditVideo = (video) => {
+        setEditingVideo(video);
+        setEditTitle(video.title);
+        setEditTrimStart(video.defaultTrimStart || 0);
+        setEditTrimEnd(video.defaultTrimEnd || 0);
+        setEditCropX(video.defaultCropX || 0);
+        setEditCropY(video.defaultCropY || 0);
+        setEditCropWidth(video.defaultCropWidth || 100);
+        setEditCropHeight(video.defaultCropHeight || 100);
+        setPreviewTime(video.defaultTrimStart || 0);
+        setPreviewPlaying(false);
+      };
+
+      const handleSaveVideo = () => {
+        if (editingVideo) {
+          onSaveVideoSettings(editingVideo.filename, {
+            title: editTitle,
+            defaultTrimStart: editTrimStart,
+            defaultTrimEnd: editTrimEnd,
+            defaultCropX: editCropX,
+            defaultCropY: editCropY,
+            defaultCropWidth: editCropWidth,
+            defaultCropHeight: editCropHeight
+          });
+          if (previewVideoRef) {
+            previewVideoRef.pause();
+          }
+          setEditingVideo(null);
+        }
+      };
+
+      const handleCancelEdit = () => {
+        if (previewVideoRef) {
+          previewVideoRef.pause();
+        }
+        setEditingVideo(null);
+      };
+
+      return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 text-white p-6' },
+        React.createElement('div', { className: 'max-w-7xl mx-auto' },
+          // Header
+          React.createElement('div', { className: 'flex items-center justify-between mb-8' },
+            React.createElement('div', null,
+              React.createElement('div', { className: 'flex items-center gap-4' },
+                React.createElement('button', {
+                  onClick: onBack,
+                  className: 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition'
+                }, '← Back'),
+                React.createElement('div', null,
+                  React.createElement('h1', { className: 'text-4xl font-bold text-green-400 mb-2' }, '📚 Video Library'),
+                  React.createElement('p', { className: 'text-gray-300' }, 'Manage your fireworks video collection')
+                )
+              )
+            ),
+            React.createElement('div', { className: 'text-right' },
+              React.createElement('div', { className: 'text-2xl font-bold text-green-400' }, downloadedVideos.size),
+              React.createElement('div', { className: 'text-sm text-gray-400' }, 'Total Videos')
+            )
+          ),
+
+          !editingVideo ? (
+            // Video List View
+            React.createElement('div', null,
+              // YouTube Downloader Section
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30 mb-6' },
+                React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 Add Videos to Library'),
+                backendStatus?.status === 'ok' 
+                  ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
+                      React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
+                      `Connected • yt-dlp ${backendStatus.ytdlp_version}`
+                    )
+                  : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
+                      React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
+                      'Backend offline - start server.py'
+                    ),
+                
+                React.createElement('div', { className: 'space-y-3' },
+                  React.createElement('div', { className: 'flex gap-2' },
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeUrl,
+                      onChange: (e) => setYoutubeUrl(e.target.value),
+                      placeholder: 'Paste YouTube URL...',
+                      className: 'flex-1 bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                      onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                    }),
+                    React.createElement('button', {
+                      onClick: handleYoutubeDownload,
+                      disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                      className: 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold'
+                    }, 'Download')
+                  ),
+
+                  downloading.length > 0 && React.createElement('div', { className: 'space-y-2' },
+                    downloading.map(dl => 
+                      React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                        React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                          React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                          React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                        ),
+                        React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                          React.createElement('div', {
+                            className: 'h-full bg-orange-500 transition-all',
+                            style: { width: `${dl.progress || 0}%` }
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                    React.createElement('button', {
+                      onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                      className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                    }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+                  ),
+
+                  showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeSearchQuery,
+                      onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                      placeholder: 'e.g., fireworks display...',
+                      className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      }
+                    }),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      },
+                      className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                    }, '🔍 Search on YouTube')
+                  )
+                )
+              ),
+
+              // Search Bar
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-green-500/30 mb-6' },
+                React.createElement('input', {
+                  type: 'text',
+                  value: searchQuery,
+                  onChange: (e) => setSearchQuery(e.target.value),
+                  placeholder: 'Search videos...',
+                  className: 'w-full bg-gray-700/50 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500'
+                })
+              ),
+
+              downloadedVideos.size === 0 
+                ? React.createElement('div', { className: 'text-center py-20 bg-gray-800/50 backdrop-blur rounded-lg border border-green-500/30' },
+                    React.createElement('div', { className: 'text-6xl mb-4' }, '📹'),
+                    React.createElement('p', { className: 'text-xl text-gray-400 mb-2' }, 'No videos in library'),
+                    React.createElement('p', { className: 'text-sm text-gray-500' }, 'Download videos from YouTube to get started')
+                  )
+                : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
+                    filteredVideos.map(video =>
+                      React.createElement('div', {
+                        key: video.filename,
+                        className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30 hover:border-green-400 transition'
+                      },
+                        React.createElement('div', { className: 'mb-3' },
+                          React.createElement('div', { className: 'font-bold text-lg mb-2 text-white truncate' }, video.title),
+                          React.createElement('div', { className: 'text-xs text-gray-400 mb-2 truncate' }, video.filename),
+                          
+                          // Duration info
+                          video.duration && React.createElement('div', { className: 'text-sm text-blue-400 mb-2 flex items-center gap-1' },
+                            React.createElement('span', null, '⏱️'),
+                            React.createElement('span', null, (() => {
+                              const trimmedDuration = (video.duration || 0) - (video.defaultTrimStart || 0) - (video.defaultTrimEnd || 0);
+                              return `${trimmedDuration.toFixed(1)}s`;
+                            })()),
+                            (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('span', { className: 'text-gray-500 text-xs' }, 
+                              `(${video.duration?.toFixed(1)}s full)`
+                            )
+                          ),
+                          
+                          (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('div', { className: 'text-xs text-yellow-400 mt-2 flex items-center gap-1' },
+                            React.createElement('span', null, '✂️'),
+                            React.createElement('span', null, `Trim: ${video.defaultTrimStart.toFixed(1)}s - ${video.defaultTrimEnd.toFixed(1)}s`)
+                          ),
+                          
+                          // Hidden video element to load duration
+                          !video.duration && React.createElement('video', {
+                            src: video.url,
+                            style: { display: 'none' },
+                            onLoadedMetadata: (e) => {
+                              const duration = e.target.duration;
+                              setDownloadedVideos(prev => {
+                                const newMap = new Map(prev);
+                                const existing = newMap.get(video.filename);
+                                if (existing) {
+                                  newMap.set(video.filename, { ...existing, duration });
+                                  // Save to localStorage
+                                  const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                                  libraryData[video.filename] = {
+                                    ...libraryData[video.filename],
+                                    duration
+                                  };
+                                  localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                                }
+                                return newMap;
+                              });
+                            }
+                          })
+                        ),
+                        React.createElement('div', { className: 'flex gap-2' },
+                          React.createElement('button', {
+                            onClick: () => handleEditVideo(video),
+                            className: 'flex-1 bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm transition'
+                          }, '✏️ Edit'),
+                          React.createElement('button', {
+                            onClick: () => {
+                              if (confirm(`Delete "${video.title}" from library?\n\nThis will remove it from the server and all shows.`)) {
+                                onDeleteVideo(video);
+                              }
+                            },
+                            className: 'bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition'
+                          }, '🗑️')
+                        )
+                      )
+                    )
+                  )
+            )
+          ) : (
+            // Video Editor View
+            React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-blue-500/30' },
+              React.createElement('div', { className: 'mb-6' },
+                React.createElement('h2', { className: 'text-2xl font-bold text-blue-400 mb-2' }, 'Editing Video Settings'),
+                React.createElement('div', { className: 'bg-yellow-900/30 border border-yellow-600/50 rounded-lg p-4 text-sm' },
+                  React.createElement('div', { className: 'font-bold text-yellow-400 mb-2 flex items-center gap-2' },
+                    React.createElement('span', null, '⚠️'),
+                    React.createElement('span', null, 'Important: Default Settings')
+                  ),
+                  React.createElement('p', { className: 'text-yellow-200 mb-2' }, 
+                    'These are DEFAULT settings for new uses of this video.'
+                  ),
+                  React.createElement('p', { className: 'text-yellow-300' }, 
+                    'Videos already added to shows will keep their existing settings and timing. This prevents accidental timing changes in your saved shows.'
+                  )
+                )
+              ),
+
+              React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-6' },
+                // Left: Video Preview
+                React.createElement('div', null,
+                  React.createElement('h3', { className: 'text-lg font-semibold mb-3 text-gray-300' }, 'Preview'),
+                  React.createElement('div', { 
+                    className: 'relative bg-black rounded-lg mb-3 overflow-hidden',
+                    style: { aspectRatio: '16/9' }
+                  },
+                    React.createElement('video', {
+                      ref: el => setPreviewVideoRef(el),
+                      src: editingVideo.url,
+                      className: 'absolute inset-0 w-full h-full object-cover',
+                      style: {
+                        clipPath: `inset(${editCropY}% ${100 - editCropX - editCropWidth}% ${100 - editCropY - editCropHeight}% ${editCropX}%)`
+                      },
+                      onTimeUpdate: (e) => setPreviewTime(e.target.currentTime),
+                      onLoadedMetadata: (e) => {
+                        e.target.currentTime = editTrimStart;
+                      }
+                    })
+                  ),
+                  React.createElement('div', { className: 'flex gap-2 mb-3' },
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (previewVideoRef) {
+                          if (previewPlaying) {
+                            previewVideoRef.pause();
+                            setPreviewPlaying(false);
+                          } else {
+                            previewVideoRef.play();
+                            setPreviewPlaying(true);
+                          }
+                        }
+                      },
+                      className: 'flex-1 bg-green-600 hover:bg-green-700 py-2 rounded transition'
+                    }, previewPlaying ? '⏸ Pause' : '▶ Play'),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (previewVideoRef) {
+                          previewVideoRef.currentTime = editTrimStart;
+                        }
+                      },
+                      className: 'bg-gray-600 hover:bg-gray-500 py-2 px-4 rounded transition'
+                    }, '↻ Go to Start')
+                  ),
+                  
+                  // Playback Slider
+                  previewVideoRef && React.createElement('div', { className: 'mb-3' },
+                    React.createElement('input', {
+                      type: 'range',
+                      min: '0',
+                      max: previewVideoRef.duration || 0,
+                      step: '0.1',
+                      value: previewTime,
+                      onChange: (e) => {
+                        const newTime = parseFloat(e.target.value);
+                        setPreviewTime(newTime);
+                        if (previewVideoRef) {
+                          previewVideoRef.currentTime = newTime;
+                        }
+                      },
+                      className: 'w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500'
+                    }),
+                    React.createElement('div', { className: 'flex justify-between text-xs text-gray-500 mt-1' },
+                      React.createElement('span', null, `0:00`),
+                      React.createElement('span', null, previewVideoRef.duration ? `${Math.floor(previewVideoRef.duration / 60)}:${Math.floor(previewVideoRef.duration % 60).toString().padStart(2, '0')}` : '0:00')
+                    )
+                  ),
+                  
+                  React.createElement('div', { className: 'text-center text-sm text-gray-400' },
+                    `Current Time: ${previewTime.toFixed(2)}s`,
+                    previewVideoRef && ` / ${previewVideoRef.duration?.toFixed(2) || 0}s`
+                  )
+                ),
+
+                // Right: Settings
+                React.createElement('div', null,
+                  React.createElement('h3', { className: 'text-lg font-semibold mb-3 text-gray-300' }, 'Default Settings'),
+                  
+                  React.createElement('div', { className: 'mb-4' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Video Title:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: editTitle,
+                      onChange: (e) => setEditTitle(e.target.value),
+                      className: 'w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      autoFocus: true
+                    })
+                  ),
+
+                  React.createElement('div', { className: 'mb-4' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Default Trim Start (seconds):'),
+                    React.createElement('div', { className: 'flex gap-2' },
+                      React.createElement('input', {
+                        type: 'number',
+                        value: editTrimStart,
+                        onChange: (e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setEditTrimStart(val);
+                          if (previewVideoRef) {
+                            previewVideoRef.currentTime = val;
+                          }
+                        },
+                        step: '0.1',
+                        min: '0',
+                        className: 'flex-1 bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500'
+                      }),
+                      React.createElement('button', {
+                        onClick: () => {
+                          if (previewVideoRef) {
+                            setEditTrimStart(parseFloat(previewTime.toFixed(2)));
+                          }
+                        },
+                        className: 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition text-sm whitespace-nowrap'
+                      }, '↓ Use Current Time')
+                    ),
+                    React.createElement('p', { className: 'text-xs text-gray-500 mt-1' }, 'Trim this many seconds from the beginning')
+                  ),
+
+                  React.createElement('div', { className: 'mb-6' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Default Trim End (seconds):'),
+                    React.createElement('div', { className: 'flex gap-2' },
+                      React.createElement('input', {
+                        type: 'number',
+                        value: editTrimEnd,
+                        onChange: (e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setEditTrimEnd(val);
+                          if (previewVideoRef) {
+                            const duration = previewVideoRef.duration;
+                            previewVideoRef.currentTime = duration - val;
+                          }
+                        },
+                        step: '0.1',
+                        min: '0',
+                        className: 'flex-1 bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500'
+                      }),
+                      React.createElement('button', {
+                        onClick: () => {
+                          if (previewVideoRef) {
+                            const duration = previewVideoRef.duration;
+                            const trimEnd = duration - previewTime;
+                            setEditTrimEnd(parseFloat(Math.max(0, trimEnd).toFixed(2)));
+                          }
+                        },
+                        className: 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition text-sm whitespace-nowrap'
+                      }, '↓ Use Current Time')
+                    ),
+                    React.createElement('p', { className: 'text-xs text-gray-500 mt-1' }, 'Trim this many seconds from the end')
+                  ),
+
+                  // Crop/Region Selection Section
+                  React.createElement('div', { className: 'mb-6 pt-6 border-t border-gray-700' },
+                    React.createElement('h4', { className: 'text-md font-semibold mb-3 text-gray-300' }, '✂️ Crop/Region Selection'),
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-3' }, 
+                      'Perfect for split-screen or quad-view videos! Select just the cake you want.'
+                    ),
+                    
+                    // Preset Buttons
+                    React.createElement('div', { className: 'mb-3' },
+                      React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Quick Presets:'),
+                      React.createElement('div', { className: 'grid grid-cols-3 gap-2 mb-2' },
+                        // Quad view presets
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↖ Top Left'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↗ Top Right'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(100); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '⬆ Top Half'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(50); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↙ Bottom Left'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(50); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↘ Bottom Right'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(50); setEditCropWidth(100); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '⬇ Bottom Half')
+                      ),
+                      React.createElement('div', { className: 'grid grid-cols-3 gap-2' },
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(100); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '← Left Half'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(100); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, 'Right Half →'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(100); setEditCropHeight(100); },
+                          className: 'bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-xs transition'
+                        }, '⊡ Full Frame')
+                      )
+                    ),
+
+                    // Manual Controls
+                    React.createElement('div', { className: 'space-y-3' },
+                      React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Fine-tune (% of frame):'),
+                      React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'X Position:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropX,
+                            onChange: (e) => setEditCropX(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0))),
+                            step: '1',
+                            min: '0',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Y Position:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropY,
+                            onChange: (e) => setEditCropY(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0))),
+                            step: '1',
+                            min: '0',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Width:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropWidth,
+                            onChange: (e) => setEditCropWidth(Math.max(1, Math.min(100, parseFloat(e.target.value) || 100))),
+                            step: '1',
+                            min: '1',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Height:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropHeight,
+                            onChange: (e) => setEditCropHeight(Math.max(1, Math.min(100, parseFloat(e.target.value) || 100))),
+                            step: '1',
+                            min: '1',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'text-sm text-gray-400 bg-gray-900/50 rounded p-3 mb-6' },
+                    previewVideoRef && React.createElement('div', null,
+                      React.createElement('div', null, `Total Duration: ${previewVideoRef.duration?.toFixed(2) || 0}s`),
+                      React.createElement('div', { className: 'text-green-400 font-bold' }, 
+                        `Trimmed Duration: ${((previewVideoRef.duration || 0) - editTrimStart - editTrimEnd).toFixed(2)}s`
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'flex gap-3' },
+                    React.createElement('button', {
+                      onClick: handleSaveVideo,
+                      className: 'flex-1 bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg transition font-bold'
+                    }, '✓ Save Changes'),
+                    React.createElement('button', {
+                      onClick: handleCancelEdit,
+                      className: 'flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-3 rounded-lg transition font-bold'
+                    }, '✕ Cancel')
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ========================
+    // Show Editor Component
+    // ========================
+    const ShowEditor = ({ 
+      showName,
+      videos,
+      setVideos,
+      downloadedVideos,
+      isPlaying,
+      setIsPlaying,
+      masterTime,
+      setMasterTime,
+      totalDuration,
+      setTotalDuration,
+      zoom,
+      setZoom,
+      draggingId,
+      setDraggingId,
+      dragStartX,
+      setDragStartX,
+      dragStartOffset,
+      setDragStartOffset,
+      gridHeight,
+      setGridHeight,
+      videoRefs,
+      timelineRef,
+      onSave,
+      onBack,
+      onAddFromLibrary,
+      onDownloadComplete
+    }) => {
+      const [saveAsName, setSaveAsName] = React.useState('');
+      const [showSaveAs, setShowSaveAs] = React.useState(false);
+      const [showLibraryAdd, setShowLibraryAdd] = React.useState(false);
+      
+      // YouTube download functionality
+      const [showYoutubeDownload, setShowYoutubeDownload] = React.useState(false);
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      // Poll for download progress
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            downloading.map(async (dl) => {
+              try {
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
+                const status = await res.json();
+                return { ...dl, ...status };
+              } catch {
+                return dl;
+              }
+            })
+          );
+          
+          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          
+          // Notify parent of completed downloads
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => clearInterval(interval);
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        if (!youtubeUrl.trim()) return;
+        
+        try {
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          
+          if (data.error) {
+            alert(`Error: ${data.error}`);
+            return;
+          }
+          
+          setDownloading(prev => [...prev, { 
+            id: data.id, 
+            url: youtubeUrl, 
+            status: 'downloading',
+            progress: 0 
+          }]);
+          setYoutubeUrl('');
+        } catch (err) {
+          alert('Failed to start download. Is the backend running?');
+        }
+      };
+
+      const handleVideoLoaded = (id, duration) => {
+        setVideos(prev => {
+          const updated = prev.map(v => v.id === id ? { ...v, duration } : v);
+          const maxEnd = Math.max(...updated.map(v => {
+            const trimStart = v.trimStart || 0;
+            const trimEnd = v.trimEnd || 0;
+            return v.offset + (v.duration - trimStart - trimEnd);
+          }));
+          if (maxEnd > totalDuration) setTotalDuration(maxEnd + 10);
+          return updated;
+        });
+      };
+
+      const handleTimelineMouseDown = (e, videoId) => {
+        e.stopPropagation();
+        const video = videos.find(v => v.id === videoId);
+        setDraggingId(videoId);
+        setDragStartX(e.clientX);
+        setDragStartOffset(video.offset);
+      };
+
+      const handleTimelineMouseMove = React.useCallback((e) => {
+        if (!draggingId || !timelineRef.current) return;
+        
+        const timelineWidth = timelineRef.current.offsetWidth;
+        const pixelsPerSecond = (timelineWidth * zoom) / totalDuration;
+        const deltaX = e.clientX - dragStartX;
+        const deltaTime = deltaX / pixelsPerSecond;
+        const newOffset = Math.max(0, dragStartOffset + deltaTime);
+        
+        setVideos(prev => prev.map(v => 
+          v.id === draggingId ? { ...v, offset: newOffset } : v
+        ));
+      }, [draggingId, dragStartX, dragStartOffset, zoom, totalDuration, setVideos, timelineRef]);
+
+      const handleTimelineMouseUp = React.useCallback(() => setDraggingId(null), [setDraggingId]);
+
+      React.useEffect(() => {
+        if (draggingId) {
+          window.addEventListener('mousemove', handleTimelineMouseMove);
+          window.addEventListener('mouseup', handleTimelineMouseUp);
+          return () => {
+            window.removeEventListener('mousemove', handleTimelineMouseMove);
+            window.removeEventListener('mouseup', handleTimelineMouseUp);
+          };
+        }
+      }, [draggingId, handleTimelineMouseMove, handleTimelineMouseUp]);
+
+      const handleTimelineClick = (e) => {
+        if (draggingId) return;
+        const rect = timelineRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const clickTime = (x / rect.width) * totalDuration / zoom;
+        setMasterTime(Math.max(0, Math.min(clickTime, totalDuration)));
+      };
+
+      const removeVideo = (id) => {
+        const video = videos.find(v => v.id === id);
+        if (video?.url?.startsWith('blob:')) URL.revokeObjectURL(video.url);
+        setVideos(prev => prev.filter(v => v.id !== id));
+      };
+
+      const updateOffset = (id, newOffset) => {
+        setVideos(prev => prev.map(v => 
+          v.id === id ? { ...v, offset: Math.max(0, parseFloat(newOffset) || 0) } : v
+        ));
+      };
+
+      const updateTrimStart = (id, newTrimStart) => {
+        setVideos(prev => prev.map(v => {
+          if (v.id !== id) return v;
+          const trimEnd = v.trimEnd || 0;
+          const trimStart = Math.max(0, Math.min(parseFloat(newTrimStart) || 0, v.duration - trimEnd - 0.1));
+          return { ...v, trimStart };
+        }));
+      };
+
+      const updateTrimEnd = (id, newTrimEnd) => {
+        setVideos(prev => prev.map(v => {
+          if (v.id !== id) return v;
+          const trimStart = v.trimStart || 0;
+          const trimEnd = Math.max(0, Math.min(parseFloat(newTrimEnd) || 0, v.duration - trimStart - 0.1));
+          return { ...v, trimEnd };
+        }));
+      };
+
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds % 1) * 10);
+        return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
+      };
+
+      const handleSave = () => {
+        if (showName) {
+          onSave(showName);
+        } else {
+          setShowSaveAs(true);
+        }
+      };
+
+      const handleSaveAs = () => {
+        if (saveAsName.trim()) {
+          onSave(saveAsName.trim());
+          setSaveAsName('');
+          setShowSaveAs(false);
+        }
+      };
+
+      return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-4 flex flex-col' },
+        // Header
+        React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+          React.createElement('div', { className: 'flex items-center gap-4' },
+            React.createElement('button', {
+              onClick: onBack,
+              className: 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition'
+            }, '← Back to Dashboard'),
+            React.createElement('div', null,
+              React.createElement('h1', { className: 'text-2xl font-bold text-orange-400' }, 
+                showName ? `Editing: ${showName}` : 'New Show'
+              )
+            )
+          ),
+          React.createElement('div', { className: 'flex gap-2' },
+            React.createElement('button', {
+              onClick: () => setShowYoutubeDownload(!showYoutubeDownload),
+              className: `px-4 py-2 rounded transition ${showYoutubeDownload ? 'bg-orange-600 border-2 border-orange-400' : 'bg-orange-500 hover:bg-orange-600'}`
+            }, '📥 YouTube'),
+            React.createElement('button', {
+              onClick: () => setShowLibraryAdd(!showLibraryAdd),
+              className: 'bg-green-600 hover:bg-green-700 px-4 py-2 rounded transition'
+            }, '+ Add from Library'),
+            showName
+              ? React.createElement('button', {
+                  onClick: handleSave,
+                  className: 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold'
+                }, '💾 Save')
+              : React.createElement('button', {
+                  onClick: () => setShowSaveAs(true),
+                  className: 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold'
+                }, '💾 Save As...')
+          )
+        ),
+
+        // Save As Dialog
+        showSaveAs && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4' },
+            React.createElement('h3', { className: 'text-xl font-bold mb-4' }, 'Save Show As'),
+            React.createElement('input', {
+              type: 'text',
+              value: saveAsName,
+              onChange: (e) => setSaveAsName(e.target.value),
+              placeholder: 'Enter show name...',
+              className: 'w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4',
+              onKeyDown: (e) => e.key === 'Enter' && handleSaveAs(),
+              autoFocus: true
+            }),
+            React.createElement('div', { className: 'flex gap-2' },
+              React.createElement('button', {
+                onClick: handleSaveAs,
+                disabled: !saveAsName.trim(),
+                className: 'flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 px-4 py-2 rounded transition'
+              }, 'Save'),
+              React.createElement('button', {
+                onClick: () => { setShowSaveAs(false); setSaveAsName(''); },
+                className: 'flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded transition'
+              }, 'Cancel')
+            )
+          )
+        ),
+
+        // YouTube Download Panel
+        showYoutubeDownload && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4' },
+            React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+              React.createElement('h3', { className: 'text-xl font-bold text-orange-300' }, '📥 Download from YouTube'),
+              React.createElement('button', {
+                onClick: () => setShowYoutubeDownload(false),
+                className: 'bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded'
+              }, '✕')
+            ),
+            
+            backendStatus?.status === 'ok' 
+              ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
+                  `Connected • yt-dlp ${backendStatus.ytdlp_version}`
+                )
+              : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
+                  'Backend offline - start server.py'
+                ),
+            
+            React.createElement('div', { className: 'space-y-3' },
+              React.createElement('div', { className: 'flex gap-2' },
+                React.createElement('input', {
+                  type: 'text',
+                  value: youtubeUrl,
+                  onChange: (e) => setYoutubeUrl(e.target.value),
+                  placeholder: 'Paste YouTube URL...',
+                  className: 'flex-1 bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                  onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                }),
+                React.createElement('button', {
+                  onClick: handleYoutubeDownload,
+                  disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                  className: 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold'
+                }, 'Download')
+              ),
+
+              downloading.length > 0 && React.createElement('div', { className: 'space-y-2' },
+                downloading.map(dl => 
+                  React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                    React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                      React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                      React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                    ),
+                    React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                      React.createElement('div', {
+                        className: 'h-full bg-orange-500 transition-all',
+                        style: { width: `${dl.progress || 0}%` }
+                      })
+                    )
+                  )
+                )
+              ),
+
+              React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                React.createElement('button', {
+                  onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                  className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+              ),
+
+              showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                React.createElement('input', {
+                  type: 'text',
+                  value: youtubeSearchQuery,
+                  onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                  placeholder: 'e.g., fireworks display...',
+                  className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                  onKeyDown: (e) => {
+                    if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                      window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                    }
+                  }
+                }),
+                React.createElement('button', {
+                  onClick: () => {
+                    if (youtubeSearchQuery.trim()) {
+                      window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                    }
+                  },
+                  className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                }, '🔍 Search on YouTube')
+              )
+            )
+          )
+        ),
+
+        // Add from Library Dialog
+        showLibraryAdd && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto' },
+            React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+              React.createElement('h3', { className: 'text-xl font-bold' }, '📚 Add from Library'),
+              React.createElement('button', {
+                onClick: () => setShowLibraryAdd(false),
+                className: 'bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded'
+              }, '✕')
+            ),
+            downloadedVideos.size === 0 
+              ? React.createElement('p', { className: 'text-gray-500 text-center py-8' }, 'No videos in library')
+              : React.createElement('div', { className: 'space-y-2' },
+                  Array.from(downloadedVideos.values()).map(video =>
+                    React.createElement('div', {
+                      key: video.filename,
+                      className: 'bg-gray-700 rounded p-3 hover:bg-gray-600 transition cursor-pointer',
+                      onClick: () => {
+                        onAddFromLibrary(video);
+                        setShowLibraryAdd(false);
+                      }
+                    },
+                      React.createElement('div', { className: 'font-medium text-sm' }, video.title),
+                      React.createElement('div', { className: 'text-xs text-gray-400' }, video.filename),
+                      (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('div', { className: 'text-xs text-yellow-400 mt-1' },
+                        `Default trim: ${video.defaultTrimStart.toFixed(1)}s - ${video.defaultTrimEnd.toFixed(1)}s`
+                      )
+                    )
+                  )
+                )
+          )
+        ),
+
+        // Video Grid Section
+        React.createElement('div', { className: 'mb-4' },
+          React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+            React.createElement('h2', { className: 'font-semibold text-gray-300' }, 
+              (() => {
+                const activeVideos = videos.filter(video => {
+                  const trimStart = video.trimStart || 0;
+                  const trimEnd = video.trimEnd || 0;
+                  const videoTime = masterTime - video.offset;
+                  const trimmedDuration = video.duration - trimStart - trimEnd;
+                  return videoTime >= 0 && videoTime <= trimmedDuration;
+                });
+                return `Video Grid (${activeVideos.length} playing / ${videos.length} total)`;
+              })()
+            ),
+            React.createElement('div', { className: 'flex items-center gap-3' },
+              React.createElement('span', { className: 'text-xs text-gray-400' }, 'Grid Height:'),
+              React.createElement('input', {
+                type: 'range',
+                min: '150',
+                max: '800',
+                step: '50',
+                value: gridHeight,
+                onChange: (e) => {
+                  const height = parseInt(e.target.value);
+                  setGridHeight(height);
+                  localStorage.setItem('fwp_gridHeight', height);
+                },
+                className: 'w-32'
+              }),
+              React.createElement('span', { className: 'text-xs text-gray-300 w-16' }, `${gridHeight}px`)
+            )
+          ),
+          
+          React.createElement('div', { 
+            className: 'gap-2 bg-gray-900 rounded-lg p-2 overflow-auto',
+            style: { 
+              height: `${gridHeight}px`,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              alignContent: 'start'
+            }
+          },
+          videos.length === 0 
+            ? React.createElement('div', { className: 'col-span-full flex items-center justify-center border-2 border-dashed border-gray-600 rounded-lg' },
+                React.createElement('div', { className: 'text-center text-gray-400' },
+                  React.createElement('p', { className: 'text-lg mb-2' }, 'No videos loaded'),
+                  React.createElement('p', { className: 'text-sm' }, 'Use "Add from Library" to add videos to your timeline')
+                )
+              )
+            : videos
+                .filter(video => {
+                  const trimStart = video.trimStart || 0;
+                  const trimEnd = video.trimEnd || 0;
+                  const videoTime = masterTime - video.offset;
+                  const trimmedDuration = video.duration - trimStart - trimEnd;
+                  return videoTime >= 0 && videoTime <= trimmedDuration; // Only show if currently playing
+                })
+                .map(video => {
+                const trimStart = video.trimStart || 0;
+                const trimEnd = video.trimEnd || 0;
+                const videoTime = masterTime - video.offset;
+                const trimmedDuration = video.duration - trimStart - trimEnd;
+                const isActive = videoTime >= 0 && videoTime <= trimmedDuration;
+                
+                return React.createElement('div', {
+                  key: video.id,
+                  className: 'relative bg-black rounded-lg overflow-hidden border-2 transition-colors flex items-center justify-center',
+                  style: { 
+                    borderColor: isActive ? video.color : '#374151',
+                    aspectRatio: '16/9'
+                  }
+                },
+                  React.createElement('video', {
+                    ref: el => videoRefs.current[video.id] = el,
+                    src: video.url,
+                    className: 'max-w-full max-h-full object-cover',
+                    style: {
+                      clipPath: `inset(${video.cropY || 0}% ${100 - (video.cropX || 0) - (video.cropWidth || 100)}% ${100 - (video.cropY || 0) - (video.cropHeight || 100)}% ${video.cropX || 0}%)`
+                    },
+                    onLoadedMetadata: (e) => handleVideoLoaded(video.id, e.target.duration),
+                    crossOrigin: 'anonymous'
+                  }),
+                  React.createElement('div', {
+                    className: 'absolute top-2 left-2 px-2 py-1 rounded text-sm font-medium max-w-[60%] truncate',
+                    style: { backgroundColor: video.color }
+                  }, video.name),
+                  React.createElement('button', {
+                    onClick: () => removeVideo(video.id),
+                    className: 'absolute top-2 right-2 bg-red-600 hover:bg-red-700 w-6 h-6 rounded flex items-center justify-center text-sm'
+                  }, '×'),
+                  React.createElement('div', { className: 'absolute bottom-2 left-2 right-2 bg-black/80 px-2 py-1 rounded space-y-1' },
+                    React.createElement('div', { className: 'flex items-center gap-2' },
+                      React.createElement('span', { className: 'text-xs' }, 'Start:'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: video.offset.toFixed(1),
+                        onChange: (e) => updateOffset(video.id, e.target.value),
+                        className: 'w-14 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, 's')
+                    ),
+                    React.createElement('div', { className: 'flex items-center gap-1' },
+                      React.createElement('span', { className: 'text-xs' }, 'Trim:'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: trimStart.toFixed(1),
+                        onChange: (e) => updateTrimStart(video.id, e.target.value),
+                        className: 'w-12 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, '↔'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: trimEnd.toFixed(1),
+                        onChange: (e) => updateTrimEnd(video.id, e.target.value),
+                        className: 'w-12 bg-gray-800 text-white text-xs px-1 py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, 's'),
+                      React.createElement('span', { className: 'text-xs text-gray-500 ml-auto' }, 
+                        `${trimmedDuration.toFixed(1)}s`)
+                    )
+                  )
+                );
+              })
+          )
+        ),
+
+        // Transport Controls
+        React.createElement('div', { className: 'bg-gray-800 rounded-lg p-4 mb-4' },
+          React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
+            React.createElement('button', {
+              onClick: () => setMasterTime(0),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+            }, '⏮ Reset'),
+            React.createElement('button', {
+              onClick: () => setMasterTime(prev => Math.max(0, prev - 1)),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+            }, '-1s'),
+            React.createElement('button', {
+              onClick: () => setIsPlaying(!isPlaying),
+              className: `px-6 py-2 rounded font-bold ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`
+            }, isPlaying ? '⏸ Pause' : '▶ Play'),
+            React.createElement('button', {
+              onClick: () => setMasterTime(prev => Math.min(totalDuration, prev + 1)),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded'
+            }, '+1s'),
+            React.createElement('div', { className: 'text-xl font-mono ml-4' },
+              `${formatTime(masterTime)} / ${formatTime(totalDuration)}`
+            )
+          ),
+          React.createElement('input', {
+            type: 'range',
+            min: '0',
+            max: totalDuration,
+            step: '0.1',
+            value: masterTime,
+            onChange: (e) => setMasterTime(parseFloat(e.target.value)),
+            className: 'w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-500'
+          })
+        ),
+
+        // Timeline
+        React.createElement('div', { className: 'bg-gray-800 rounded-lg p-4' },
+          React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+            React.createElement('h2', { className: 'font-semibold' }, 'Timeline'),
+            React.createElement('div', { className: 'flex items-center gap-4' },
+              React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('span', { className: 'text-sm text-gray-400' }, 'Duration:'),
+                React.createElement('input', {
+                  type: 'number',
+                  value: totalDuration,
+                  onChange: (e) => setTotalDuration(Math.max(10, parseFloat(e.target.value) || 60)),
+                  className: 'w-16 bg-gray-700 text-white text-sm px-2 py-1 rounded',
+                  min: '10'
+                }),
+                React.createElement('span', { className: 'text-sm' }, 'sec')
+              ),
+              React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('span', { className: 'text-sm text-gray-400' }, 'Zoom:'),
+                React.createElement('input', {
+                  type: 'range',
+                  min: '0.5',
+                  max: '4',
+                  step: '0.1',
+                  value: zoom,
+                  onChange: (e) => setZoom(parseFloat(e.target.value)),
+                  className: 'w-24'
+                }),
+                React.createElement('span', { className: 'text-sm' }, `${zoom.toFixed(1)}x`)
+              )
+            )
+          ),
+          React.createElement('div', { className: 'relative h-6 mb-1 overflow-hidden' },
+            Array.from({ length: Math.ceil(totalDuration / 5) + 1 }, (_, i) =>
+              React.createElement('div', {
+                key: i,
+                className: 'absolute text-xs text-gray-500',
+                style: { left: `${(i * 5 / totalDuration) * 100 * zoom}%` }
+              }, `${i * 5}s`)
+            )
+          ),
+          React.createElement('div', {
+            ref: timelineRef,
+            className: 'relative bg-gray-900 rounded overflow-x-auto cursor-pointer',
+            style: { minHeight: Math.max(100, videos.length * 40 + 20) },
+            onClick: handleTimelineClick
+          },
+            React.createElement('div', {
+              className: 'absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none',
+              style: { left: `${(masterTime / totalDuration) * 100 * zoom}%` }
+            },
+              React.createElement('div', {
+                className: 'absolute -top-1 -left-2 w-0 h-0 border-l-4 border-r-4 border-t-8 border-transparent border-t-red-500'
+              })
+            ),
+            videos.map((video, index) => {
+              const trimStart = video.trimStart || 0;
+              const trimEnd = video.trimEnd || 0;
+              const trimmedDuration = video.duration - trimStart - trimEnd;
+              
+              return React.createElement('div', {
+                key: video.id,
+                className: 'absolute h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg',
+                style: {
+                  top: index * 40 + 10,
+                  left: `${(video.offset / totalDuration) * 100 * zoom}%`,
+                  width: `${(trimmedDuration / totalDuration) * 100 * zoom}%`,
+                  backgroundColor: video.color,
+                  minWidth: '60px'
+                },
+                onMouseDown: (e) => handleTimelineMouseDown(e, video.id)
+              }, `${video.name} (${trimmedDuration.toFixed(1)}s)`);
+            })
+          ),
+          React.createElement('p', { className: 'text-xs text-gray-500 mt-2' },
+            'Drag clips to adjust timing • Click timeline to seek'
+          )
+        ),
+
+        // Cue Sheet
+        videos.length > 0 && React.createElement('div', { className: 'mt-4 bg-gray-800 rounded-lg p-4' },
+          React.createElement('h3', { className: 'font-semibold mb-2' }, 'Show Timing Cue Sheet'),
+          React.createElement('div', { className: 'grid gap-1 text-sm font-mono' },
+            [...videos]
+              .sort((a, b) => a.offset - b.offset)
+              .map(video => {
+                const trimStart = video.trimStart || 0;
+                const trimEnd = video.trimEnd || 0;
+                const trimmedDuration = video.duration - trimStart - trimEnd;
+                return React.createElement('div', { key: video.id, className: 'flex gap-2' },
+                  React.createElement('span', { style: { color: video.color } }, '●'),
+                  React.createElement('span', { className: 'text-gray-400 w-16' }, formatTime(video.offset)),
+                  React.createElement('span', null, video.name),
+                  React.createElement('span', { className: 'text-gray-500' }, `(${trimmedDuration.toFixed(1)}s)`)
+                );
+              })
+          )
+        )
+      );
+    };
+
+    // ======================
+    // Main App Component
+    // ======================
+    const FireworksPlanner = () => {
+      const [currentView, setCurrentView] = React.useState('dashboard'); // 'dashboard', 'library', 'editor'
+      const [currentShowName, setCurrentShowName] = React.useState(null);
+      
+      const [videos, setVideos] = React.useState([]);
+      const [downloadedVideos, setDownloadedVideos] = React.useState(new Map());
+      const [isPlaying, setIsPlaying] = React.useState(false);
+      const [masterTime, setMasterTime] = React.useState(0);
+      const [totalDuration, setTotalDuration] = React.useState(60);
+      const [zoom, setZoom] = React.useState(1);
+      const [draggingId, setDraggingId] = React.useState(null);
+      const [dragStartX, setDragStartX] = React.useState(0);
+      const [dragStartOffset, setDragStartOffset] = React.useState(0);
+      
+      const [savedSessions, setSavedSessions] = React.useState([]);
+      const [gridHeight, setGridHeight] = React.useState(400);
+      const [toasts, setToasts] = React.useState([]);
+      
+      const videoRefs = React.useRef({});
+      const timelineRef = React.useRef(null);
+      const animationRef = React.useRef(null);
+      const lastTimeRef = React.useRef(Date.now());
+
+      const showToast = (message, type = 'info') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        }, 3000);
+      };
+
+      React.useEffect(() => {
+        loadSessionsList();
+        loadAvailableVideos();
+        
+        const savedGridHeight = localStorage.getItem('fwp_gridHeight');
+        if (savedGridHeight) {
+          setGridHeight(parseInt(savedGridHeight));
+        }
+      }, []);
+
+      const loadSessionsList = () => {
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        setSavedSessions(sessions);
+      };
+
+      const loadAvailableVideos = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/videos`);
+          const serverVideos = await res.json();
+          
+          const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+          
+          const videoMap = new Map();
+          serverVideos.forEach(video => {
+            const savedData = libraryData[video.filename] || {};
+            videoMap.set(video.filename, {
+              filename: video.filename,
+              title: savedData.title || video.title || video.filename,
+              url: `${API_BASE}/videos/${video.filename}`,
+              sourceUrl: savedData.sourceUrl || null,
+              size: video.size,
+              duration: savedData.duration || null,
+              defaultTrimStart: savedData.defaultTrimStart || 0,
+              defaultTrimEnd: savedData.defaultTrimEnd || 0,
+              defaultCropX: savedData.defaultCropX || 0,
+              defaultCropY: savedData.defaultCropY || 0,
+              defaultCropWidth: savedData.defaultCropWidth || 100,
+              defaultCropHeight: savedData.defaultCropHeight || 100
+            });
+          });
+          
+          setDownloadedVideos(videoMap);
+        } catch (err) {
+          console.error('Failed to load videos from backend:', err);
+        }
+      };
+
+      const saveLibraryMetadata = (videos) => {
+        const libraryData = {};
+        videos.forEach((video, filename) => {
+          libraryData[filename] = {
+            title: video.title,
+            sourceUrl: video.sourceUrl,
+            duration: video.duration,
+            defaultTrimStart: video.defaultTrimStart || 0,
+            defaultTrimEnd: video.defaultTrimEnd || 0,
+            defaultCropX: video.defaultCropX || 0,
+            defaultCropY: video.defaultCropY || 0,
+            defaultCropWidth: video.defaultCropWidth || 100,
+            defaultCropHeight: video.defaultCropHeight || 100
+          };
+        });
+        localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+      };
+
+      const handleNewShow = () => {
+        setCurrentShowName(null);
+        setVideos([]);
+        setMasterTime(0);
+        setTotalDuration(60);
+        setZoom(1);
+        setIsPlaying(false);
+        setCurrentView('editor');
+      };
+
+      const handleEditShow = (showName) => {
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        const session = sessions.find(s => s.name === showName);
+        
+        if (!session) {
+          showToast('Session not found', 'error');
+          return;
+        }
+
+        videos.forEach(v => {
+          if (v.url.startsWith('blob:')) {
+            URL.revokeObjectURL(v.url);
+          }
+        });
+
+        setVideos(session.videos.filter(v => v.url));
+        setTotalDuration(session.totalDuration || 60);
+        setZoom(session.zoom || 1);
+        setMasterTime(0);
+        setIsPlaying(false);
+        setCurrentShowName(showName);
+        setCurrentView('editor');
+        showToast(`Loaded "${showName}"`, 'success');
+      };
+
+      const handleBackToDashboard = () => {
+        if (currentShowName && videos.length > 0) {
+          saveShow(currentShowName, true);
+        }
+        setCurrentView('dashboard');
+        setIsPlaying(false);
+        loadSessionsList();
+      };
+
+      const handleGoToLibrary = () => {
+        setCurrentView('library');
+        loadAvailableVideos();
+      };
+
+      const handleBackFromLibrary = () => {
+        setCurrentView('dashboard');
+        loadAvailableVideos();
+      };
+
+      const handleDeleteShow = (name) => {
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        const filtered = sessions.filter(s => s.name !== name);
+        localStorage.setItem('fwp_sessions', JSON.stringify(filtered));
+        loadSessionsList();
+        showToast(`Deleted show "${name}"`, 'success');
+      };
+
+      const handleDownloadComplete = (dl) => {
+        setDownloadedVideos(prev => {
+          const newMap = new Map(prev);
+          newMap.set(dl.filename, {
+            filename: dl.filename,
+            title: dl.title || dl.filename,
+            url: `${API_BASE}/videos/${dl.filename}`,
+            sourceUrl: dl.url,
+            size: 0,
+            defaultTrimStart: 0,
+            defaultTrimEnd: 0
+          });
+          saveLibraryMetadata(newMap);
+          return newMap;
+        });
+        showToast(`Downloaded: ${dl.title}`, 'success');
+      };
+
+      const handleDeleteVideo = async (video) => {
+        try {
+          await fetch(`${API_BASE}/api/videos/${video.filename}`, {
+            method: 'DELETE'
+          });
+          
+          setDownloadedVideos(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(video.filename);
+            saveLibraryMetadata(newMap);
+            return newMap;
+          });
+
+          setVideos(prev => prev.filter(v => v.filename !== video.filename));
+          showToast(`"${video.title}" deleted`, 'success');
+        } catch (err) {
+          showToast('Failed to delete video: ' + err.message, 'error');
+        }
+      };
+
+      const handleSaveVideoSettings = (filename, updates) => {
+        setDownloadedVideos(prev => {
+          const newMap = new Map(prev);
+          const existing = newMap.get(filename);
+          if (existing) {
+            newMap.set(filename, { ...existing, ...updates });
+            saveLibraryMetadata(newMap);
+          }
+          return newMap;
+        });
+        showToast('Video settings saved', 'success');
+      };
+
+      const handleAddFromLibrary = (videoData) => {
+        const newInstance = {
+          id: `${videoData.filename}-${Date.now()}`,
+          name: videoData.title || videoData.filename,
+          filename: videoData.filename,
+          url: videoData.url,
+          sourceUrl: videoData.sourceUrl,
+          offset: 0,
+          duration: 0,
+          volume: 1.0,
+          trimStart: videoData.defaultTrimStart || 0,
+          trimEnd: videoData.defaultTrimEnd || 0,
+          cropX: videoData.defaultCropX || 0,
+          cropY: videoData.defaultCropY || 0,
+          cropWidth: videoData.defaultCropWidth || 100,
+          cropHeight: videoData.defaultCropHeight || 100,
+          color: `hsl(${videos.length * 60}, 70%, 50%)`
+        };
+        setVideos(prev => [...prev, newInstance]);
+      };
+
+      const saveShow = (name, silent = false) => {
+        if (!name || !name.trim()) {
+          if (!silent) showToast('Please enter a show name', 'warning');
+          return;
+        }
+
+        const session = {
+          name: name.trim(),
+          timestamp: new Date().toISOString(),
+          totalDuration,
+          zoom,
+          videos: videos.map(v => ({
+            id: v.id,
+            name: v.name,
+            filename: v.filename,
+            url: v.url.startsWith('blob:') ? null : v.url,
+            offset: v.offset,
+            duration: v.duration,
+            volume: v.volume,
+            trimStart: v.trimStart || 0,
+            trimEnd: v.trimEnd || 0,
+            cropX: v.cropX || 0,
+            cropY: v.cropY || 0,
+            cropWidth: v.cropWidth || 100,
+            cropHeight: v.cropHeight || 100,
+            color: v.color
+          }))
+        };
+
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        const existingIndex = sessions.findIndex(s => s.name === name.trim());
+        
+        if (existingIndex >= 0) {
+          sessions[existingIndex] = session;
+        } else {
+          sessions.push(session);
+        }
+
+        localStorage.setItem('fwp_sessions', JSON.stringify(sessions));
+        localStorage.setItem('fwp_lastSession', name.trim());
+        loadSessionsList();
+        setCurrentShowName(name.trim());
+        if (!silent) {
+          showToast(`Show "${name.trim()}" saved!`, 'success');
+        }
+      };
+
+      // Auto-save when editing
+      React.useEffect(() => {
+        if (currentView === 'editor' && currentShowName && videos.length > 0) {
+          const interval = setInterval(() => {
+            saveShow(currentShowName, true);
+          }, 10000);
+          return () => clearInterval(interval);
+        }
+      }, [currentView, currentShowName, videos, totalDuration, zoom]);
+
+      // Video playback sync
+      React.useEffect(() => {
+        if (isPlaying) {
+          lastTimeRef.current = Date.now();
+          
+          const tick = () => {
+            const now = Date.now();
+            const delta = (now - lastTimeRef.current) / 1000;
+            lastTimeRef.current = now;
+            
+            setMasterTime(prev => {
+              const next = prev + delta;
+              if (next >= totalDuration) {
+                setIsPlaying(false);
+                return 0;
+              }
+              return next;
+            });
+            
+            animationRef.current = requestAnimationFrame(tick);
+          };
+          
+          animationRef.current = requestAnimationFrame(tick);
+        } else if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+        }
+        
+        return () => {
+          if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        };
+      }, [isPlaying, totalDuration]);
+
+      React.useEffect(() => {
+        videos.forEach(video => {
+          const videoEl = videoRefs.current[video.id];
+          if (!videoEl) return;
+          
+          videoEl.volume = video.volume || 1.0;
+          
+          const trimStart = video.trimStart || 0;
+          const trimEnd = video.trimEnd || 0;
+          const videoTime = masterTime - video.offset;
+          const trimmedDuration = video.duration - trimStart - trimEnd;
+          
+          if (videoTime >= 0 && videoTime <= trimmedDuration) {
+            const actualVideoTime = videoTime + trimStart;
+            
+            if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.3) {
+              videoEl.currentTime = actualVideoTime;
+            }
+            if (isPlaying && videoEl.paused) {
+              videoEl.play().catch(() => {});
+            } else if (!isPlaying && !videoEl.paused) {
+              videoEl.pause();
+            }
+          } else {
+            if (!videoEl.paused) videoEl.pause();
+            if (videoTime < 0) videoEl.currentTime = trimStart;
+          }
+        });
+      }, [masterTime, videos, isPlaying]);
+
+      return React.createElement('div', null,
+        currentView === 'dashboard' 
+          ? React.createElement(Dashboard, {
+              onEditShow: handleEditShow,
+              onNewShow: handleNewShow,
+              onGoToLibrary: handleGoToLibrary,
+              savedSessions,
+              onDeleteShow: handleDeleteShow,
+              downloadedVideos,
+              onDownloadComplete: handleDownloadComplete
+            })
+          : currentView === 'library'
+          ? React.createElement(LibraryView, {
+              downloadedVideos,
+              setDownloadedVideos,
+              onBack: handleBackFromLibrary,
+              onDeleteVideo: handleDeleteVideo,
+              onSaveVideoSettings: handleSaveVideoSettings,
+              onDownloadComplete: handleDownloadComplete
+            })
+          : React.createElement(ShowEditor, {
+              showName: currentShowName,
+              videos,
+              setVideos,
+              downloadedVideos,
+              isPlaying,
+              setIsPlaying,
+              masterTime,
+              setMasterTime,
+              totalDuration,
+              setTotalDuration,
+              zoom,
+              setZoom,
+              draggingId,
+              setDraggingId,
+              dragStartX,
+              setDragStartX,
+              dragStartOffset,
+              setDragStartOffset,
+              gridHeight,
+              setGridHeight,
+              videoRefs,
+              timelineRef,
+              onSave: saveShow,
+              onBack: handleBackToDashboard,
+              onAddFromLibrary: handleAddFromLibrary,
+              onDownloadComplete: handleDownloadComplete
+            }),
+
+        // Toast Notifications
+        React.createElement('div', {
+          className: 'fixed top-4 right-4 z-50 flex flex-col gap-2',
+          style: { maxWidth: '400px' }
+        },
+          toasts.map(toast => {
+            const bgColor = toast.type === 'error' ? 'bg-red-600' : 
+                           toast.type === 'success' ? 'bg-green-600' : 
+                           toast.type === 'warning' ? 'bg-yellow-600' : 
+                           'bg-blue-600';
+            const icon = toast.type === 'error' ? '❌' : 
+                        toast.type === 'success' ? '✅' : 
+                        toast.type === 'warning' ? '⚠️' : 
+                        'ℹ️';
+            
+            return React.createElement('div', {
+              key: toast.id,
+              className: `${bgColor} text-white px-4 py-3 rounded-lg shadow-lg flex items-start gap-2`
+            },
+              React.createElement('span', { className: 'text-lg' }, icon),
+              React.createElement('span', { className: 'flex-1 text-sm' }, toast.message)
+            );
+          })
+        )
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(FireworksPlanner));
+  </script>
+</body>
+</html>

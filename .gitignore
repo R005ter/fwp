@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Videos (user-uploaded content)
+backend/videos/*.mp4
+backend/videos/*.webm
+backend/videos/*.mkv
+backend/videos/*.mov
+backend/videos/*.avi
+backend/videos/*.m4a
+
+# Keep the videos folder itself
+!backend/videos/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+
