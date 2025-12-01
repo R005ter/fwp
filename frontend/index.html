@@ -1123,36 +1123,68 @@
           .catch(() => setBackendStatus({ status: 'offline' }));
       }, []);
 
-      // Poll for download progress
+      // Poll for download progress (only for server-side downloads)
       React.useEffect(() => {
         if (downloading.length === 0) return;
         
+        // Filter to only server-side downloads (client-side handles its own progress)
+        const serverDownloads = downloading.filter(dl => dl.serverSide === true);
+        if (serverDownloads.length === 0) {
+          console.log('[Polling] No server-side downloads to poll');
+          return;
+        }
+        
+        console.log(`[Polling] Starting to poll ${serverDownloads.length} server-side download(s)...`);
+        
         const interval = setInterval(async () => {
           const updates = await Promise.all(
-            downloading.map(async (dl) => {
+            serverDownloads.map(async (dl) => {
               try {
+                console.log(`[Polling] Checking status for download: ${dl.id}`);
                 const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
                   credentials: 'include'
                 });
+                
+                if (!res.ok) {
+                  console.warn(`[Polling] Status check failed for ${dl.id}: HTTP ${res.status}`);
+                  return dl;
+                }
+                
                 const status = await res.json();
+                console.log(`[Polling] Status for ${dl.id}:`, {
+                  status: status.status,
+                  progress: status.progress,
+                  title: status.title
+                });
+                
                 return { ...dl, ...status };
-              } catch {
+              } catch (err) {
+                console.error(`[Polling] Error checking status for ${dl.id}:`, err);
                 return dl;
               }
             })
           );
           
-          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          // Update only server-side downloads, keep client-side downloads as-is
+          setDownloading(prev => {
+            const clientDownloads = prev.filter(dl => !dl.serverSide);
+            const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
+            return [...clientDownloads, ...updatedServerDownloads];
+          });
           
           // Notify parent of completed downloads
           updates
             .filter(dl => dl.status === 'complete' && dl.filename)
             .forEach(dl => {
+              console.log(`[Polling] Download complete: ${dl.id} - ${dl.title || dl.filename}`);
               onDownloadComplete(dl);
             });
         }, 1000);
         
-        return () => clearInterval(interval);
+        return () => {
+          console.log('[Polling] Stopping polling');
+          clearInterval(interval);
+        };
       }, [downloading, onDownloadComplete]);
 
       const handleYoutubeDownload = async () => {
@@ -1851,36 +1883,68 @@
           .catch(() => setBackendStatus({ status: 'offline' }));
       }, []);
 
-      // Poll for download progress
+      // Poll for download progress (only for server-side downloads)
       React.useEffect(() => {
         if (downloading.length === 0) return;
         
+        // Filter to only server-side downloads (client-side handles its own progress)
+        const serverDownloads = downloading.filter(dl => dl.serverSide === true);
+        if (serverDownloads.length === 0) {
+          console.log('[Polling] No server-side downloads to poll');
+          return;
+        }
+        
+        console.log(`[Polling] Starting to poll ${serverDownloads.length} server-side download(s)...`);
+        
         const interval = setInterval(async () => {
           const updates = await Promise.all(
-            downloading.map(async (dl) => {
+            serverDownloads.map(async (dl) => {
               try {
+                console.log(`[Polling] Checking status for download: ${dl.id}`);
                 const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
                   credentials: 'include'
                 });
+                
+                if (!res.ok) {
+                  console.warn(`[Polling] Status check failed for ${dl.id}: HTTP ${res.status}`);
+                  return dl;
+                }
+                
                 const status = await res.json();
+                console.log(`[Polling] Status for ${dl.id}:`, {
+                  status: status.status,
+                  progress: status.progress,
+                  title: status.title
+                });
+                
                 return { ...dl, ...status };
-              } catch {
+              } catch (err) {
+                console.error(`[Polling] Error checking status for ${dl.id}:`, err);
                 return dl;
               }
             })
           );
           
-          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          // Update only server-side downloads, keep client-side downloads as-is
+          setDownloading(prev => {
+            const clientDownloads = prev.filter(dl => !dl.serverSide);
+            const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
+            return [...clientDownloads, ...updatedServerDownloads];
+          });
           
           // Notify parent of completed downloads
           updates
             .filter(dl => dl.status === 'complete' && dl.filename)
             .forEach(dl => {
+              console.log(`[Polling] Download complete: ${dl.id} - ${dl.title || dl.filename}`);
               onDownloadComplete(dl);
             });
         }, 1000);
         
-        return () => clearInterval(interval);
+        return () => {
+          console.log('[Polling] Stopping polling');
+          clearInterval(interval);
+        };
       }, [downloading, onDownloadComplete]);
 
       const handleYoutubeDownload = async () => {
