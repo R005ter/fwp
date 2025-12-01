@@ -1,14 +1,30 @@
 # YouTube PO Token Setup Guide
 
-According to the [yt-dlp PO Token Guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide), the `mweb` client requires a **PO Token (Proof of Origin Token)** for GVS (Google Video Server) requests. Without it, downloads will fail with format errors.
+**Note:** The app now uses `tv_embedded` client by default when cookies are available, which **does NOT require a PO Token**. This guide is only needed if you want to use the `mweb` client instead.
+
+According to the [yt-dlp PO Token Guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide), the `mweb` client requires a **PO Token (Proof of Origin Token)** for GVS (Google Video Server) requests. However, manual extraction of PO Tokens may be difficult as YouTube's API structure changes frequently.
 
 ## What is a PO Token?
 
 A PO Token is a parameter YouTube requires to verify requests are coming from a genuine client. It's tied to your YouTube session and is required for certain clients like `mweb`.
 
-## Step 1: Extract PO Token from YouTube Music
+## Step 1: Extract PO Token (May Not Be Available)
 
-**Important:** You must extract the PO Token from **YouTube Music** (not regular YouTube) for the `mweb` client.
+**⚠️ Important:** YouTube frequently changes their API structure. The `serviceIntegrityDimensions.poToken` field may not be present in the player request payload. If you cannot find it, consider:
+
+1. **Check the Response instead of Request:**
+   - Look in the **Response** tab of the `player` request
+   - Search for `poToken` or `serviceIntegrityDimensions` in the response JSON
+
+2. **Check `encryptedTokenJarContents`:**
+   - This field may contain encrypted tokens
+   - However, this requires decryption which is complex
+
+3. **Use a PO Token Provider Plugin (Recommended):**
+   - Manual extraction is unreliable due to API changes
+   - See "Alternative: Use a PO Token Provider Plugin" section below
+
+**If you still want to try manual extraction:**
 
 1. **Open YouTube Music** in your browser: https://music.youtube.com
 2. **Make sure you're logged in** (same account as your cookies)
@@ -23,10 +39,9 @@ A PO Token is a parameter YouTube requires to verify requests are coming from a 
    - A `player` request should appear in the network tab
 6. **Extract the PO Token:**
    - Click on the `player` request
-   - Go to the **"Payload"** or **"Request"** tab
-   - Look for the JSON request body
-   - Find the field: `serviceIntegrityDimensions.poToken`
-   - Copy the **entire value** of `poToken` (it's a long string)
+   - Check both **"Request"** (Payload) and **"Response"** tabs
+   - Search for `poToken`, `serviceIntegrityDimensions`, or `encryptedTokenJarContents`
+   - If found, copy the **entire value**
 
 ## Step 2: Add PO Token to Render.com
 
@@ -70,10 +85,21 @@ After adding the PO Token, try downloading a video. Check the logs - you should 
 - Yes! Consider using a [PO Token Provider plugin](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide#po-token-provider-plugins) like `bgutil-ytdlp-pot-provider` to automate PO Token generation
 - This would require additional setup but eliminates manual extraction
 
-## Alternative: Use a PO Token Provider Plugin
+## Alternative: Use a PO Token Provider Plugin (Recommended)
+
+**This is the recommended approach** since manual PO Token extraction is unreliable due to YouTube's frequent API changes.
 
 For automated PO Token management, you can install a plugin like:
 - [bgutil-ytdlp-pot-provider](https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs) - Automatically generates PO Tokens
 
 This would require modifying the deployment to install the plugin, but would eliminate the need for manual PO Token extraction.
+
+## Recommended: Use tv_embedded Client (No PO Token Required)
+
+**The easiest solution:** The app now uses `tv_embedded` client by default when cookies are available. This client:
+- ✅ Supports cookies
+- ✅ **Does NOT require a PO Token**
+- ✅ Works reliably without manual token extraction
+
+If downloads are working with `tv_embedded`, you don't need to set up a PO Token at all!
 
