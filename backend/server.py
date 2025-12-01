@@ -139,6 +139,7 @@ def run_ytdlp(video_id, url):
     
     # Preserve existing download info (youtube_url, user_id) if present
     existing_info = downloads.get(video_id, {})
+    user_id = existing_info.get("user_id")
     downloads[video_id] = {
         "status": "downloading",
         "progress": 0,
@@ -146,14 +147,34 @@ def run_ytdlp(video_id, url):
         "filename": None,
         "error": None,
         "youtube_url": existing_info.get("youtube_url", url),
-        "user_id": existing_info.get("user_id")
+        "user_id": user_id
     }
     
     try:
-        # First, get video info
-        # Use mweb client when cookies are available - PO Token Provider plugin will auto-handle PO Tokens
-        # Falls back to android without cookies
-        has_cookies = COOKIES_FILE.exists()
+        # Get user-specific cookies from database, fallback to global cookies file
+        user_cookies_data = None
+        cookies_file_to_use = None
+        cookie_source = "none"
+        
+        if user_id:
+            from database import get_user_youtube_cookies
+            user_cookies_data = get_user_youtube_cookies(user_id)
+            if user_cookies_data:
+                # Create temporary cookies file for this user
+                user_cookies_file = VIDEOS_DIR / f"cookies_{user_id}_{video_id}.txt"
+                user_cookies_file.write_text(user_cookies_data)
+                cookies_file_to_use = user_cookies_file
+                cookie_source = "user database"
+                print(f"[{video_id}] Using user-specific cookies from database (user_id: {user_id})")
+        
+        # Fallback to global cookies file if user doesn't have cookies
+        if not cookies_file_to_use and COOKIES_FILE.exists():
+            cookies_file_to_use = COOKIES_FILE
+            cookie_source = "from environment variable" if COOKIES_ENV else "from file"
+            print(f"[{video_id}] Using global cookies {cookie_source}")
+        
+        has_cookies = cookies_file_to_use is not None
+        
         if has_cookies:
             # mweb client - supports cookies, PO Token Provider plugin will automatically provide PO Tokens
             player_client = "mweb"
@@ -175,11 +196,10 @@ def run_ytdlp(video_id, url):
         
         # Add cookies if available
         if has_cookies:
-            info_cmd.extend(["--cookies", str(COOKIES_FILE)])
-            cookie_source = "from environment variable" if COOKIES_ENV else "from file"
-            print(f"[{video_id}] Using cookies {cookie_source} ({COOKIES_FILE}) with {player_client} client")
+            info_cmd.extend(["--cookies", str(cookies_file_to_use)])
+            print(f"[{video_id}] Using cookies {cookie_source} with {player_client} client")
         else:
-            print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
+            print(f"[{video_id}] WARNING: No cookies found. Downloads may fail due to bot detection. Please add your YouTube cookies in Settings.")
         
         info_cmd.extend([
             "--dump-json",
@@ -206,13 +226,12 @@ def run_ytdlp(video_id, url):
             "--referer", "https://www.youtube.com/",
         ]
         
-        # Add cookies if available
+        # Add cookies if available (use same cookies file as info fetch)
         if has_cookies:
-            cmd.extend(["--cookies", str(COOKIES_FILE)])
-            cookie_source = "from environment variable" if COOKIES_ENV else "from file"
-            print(f"[{video_id}] Using cookies {cookie_source} ({COOKIES_FILE}) with {player_client} client")
+            cmd.extend(["--cookies", str(cookies_file_to_use)])
+            print(f"[{video_id}] Using cookies {cookie_source} with {player_client} client")
         else:
-            print(f"[{video_id}] WARNING: No cookies file found. Downloads may fail due to bot detection.")
+            print(f"[{video_id}] WARNING: No cookies found. Downloads may fail due to bot detection. Please add your YouTube cookies in Settings.")
         
         cmd.extend([
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
@@ -346,6 +365,14 @@ def run_ytdlp(video_id, url):
             downloads[video_id]["status"] = "error"
             downloads[video_id]["error"] = f"Download failed with code {process.returncode}"
             print(f"[{video_id}] ERROR: Download failed")
+        
+        # Clean up temporary cookies file if we created one
+        if cookies_file_to_use and cookies_file_to_use != COOKIES_FILE and cookies_file_to_use.exists():
+            try:
+                cookies_file_to_use.unlink()
+                print(f"[{video_id}] Cleaned up temporary cookies file")
+            except Exception as e:
+                print(f"[{video_id}] Warning: Could not delete temporary cookies file: {e}")
             
     except Exception as e:
         downloads[video_id]["status"] = "error"
@@ -614,10 +641,56 @@ def get_current_user():
     
     user = get_user_by_id(user_id)
     if user:
+        # Check if user has cookies configured
+        from database import get_user_youtube_cookies
+        has_cookies = get_user_youtube_cookies(user_id) is not None
+        user["has_youtube_cookies"] = has_cookies
         return jsonify({"authenticated": True, "user": user})
     else:
         session.clear()
         return jsonify({"authenticated": False}), 200
+
+
+@app.route("/api/auth/cookies", methods=["POST"])
+def save_user_cookies():
+    """Save YouTube cookies for the current user"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    data = request.json
+    cookies_data = data.get("cookies")
+    
+    if not cookies_data:
+        return jsonify({"error": "No cookies data provided"}), 400
+    
+    # Validate it looks like Netscape cookie format
+    if not (cookies_data.startswith('# Netscape HTTP Cookie File') or 
+            cookies_data.startswith('# HTTP Cookie File')):
+        return jsonify({"error": "Invalid cookie format. Please export cookies in Netscape format."}), 400
+    
+    from database import set_user_youtube_cookies
+    success = set_user_youtube_cookies(user_id, cookies_data)
+    
+    if success:
+        return jsonify({"message": "Cookies saved successfully"})
+    else:
+        return jsonify({"error": "Failed to save cookies"}), 500
+
+
+@app.route("/api/auth/cookies", methods=["GET"])
+def get_user_cookies_status():
+    """Get whether user has cookies configured (without returning the actual cookies)"""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    
+    user_id = get_current_user_id()
+    from database import get_user_youtube_cookies
+    has_cookies = get_user_youtube_cookies(user_id) is not None
+    
+    return jsonify({"has_cookies": has_cookies})
 
 
 @app.route("/api/auth/google", methods=["GET"])

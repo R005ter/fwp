@@ -38,12 +38,19 @@ def init_db():
         )
     ''')
     
-    # Migrate existing users table if needed (add OAuth columns)
+    # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN oauth_provider TEXT')
         cursor.execute('ALTER TABLE users ADD COLUMN oauth_id TEXT')
     except sqlite3.OperationalError:
         pass  # Columns already exist
+    
+    # Add youtube_cookies column if it doesn't exist
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
+        print("✓ Added youtube_cookies column to users table")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     
     # Fix password_hash NOT NULL constraint for OAuth users
     # SQLite doesn't support ALTER COLUMN, so we need to recreate the table
@@ -553,4 +560,36 @@ def cleanup_orphaned_videos():
 def delete_library_item(user_id, filename):
     """Delete library metadata for a video (backward compatibility)"""
     return remove_video_from_library(user_id, filename)
+
+
+def get_user_youtube_cookies(user_id):
+    """Get YouTube cookies for a user"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT youtube_cookies FROM users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        try:
+            return row['youtube_cookies']
+        except (KeyError, IndexError):
+            return None
+    return None
+
+
+def set_user_youtube_cookies(user_id, cookies_data):
+    """Set YouTube cookies for a user"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        'UPDATE users SET youtube_cookies = ? WHERE id = ?',
+        (cookies_data, user_id)
+    )
+    conn.commit()
+    conn.close()
+    
+    return cursor.rowcount > 0
 
