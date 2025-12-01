@@ -141,12 +141,12 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use web client when cookies are available (supports cookies), otherwise use android
+        # Use mweb client when cookies are available (supports cookies, no JS required), otherwise use android
         has_cookies = COOKIES_FILE.exists()
         if has_cookies:
-            # web client supports cookies
-            player_client = "web"
-            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            # mweb (mobile web) client supports cookies and doesn't require JavaScript runtime
+            player_client = "mweb"
+            user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         else:
             # android client doesn't support cookies but may work without them
             player_client = "android"
