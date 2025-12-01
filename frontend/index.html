@@ -749,17 +749,27 @@
       }, [downloading, onDownloadComplete]);
 
       const handleYoutubeDownload = async () => {
-        if (!youtubeUrl.trim()) return;
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
         
         const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
         if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
           alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
           return;
         }
         
-        // Check if already downloaded
+        // Check if already downloaded locally (IndexedDB)
+        console.log('[Download] Checking IndexedDB for existing video...');
         const existing = await getVideoFromDB(videoId);
         if (existing) {
+          console.log('[Download] Video found in local cache');
           const metadata = await getVideoMetadataFromDB(videoId);
           onDownloadComplete({
             id: videoId,
@@ -774,87 +784,51 @@
           return;
         }
         
-        // Start client-side download
-        const downloadId = videoId;
+        // Use server-side download (client-side APIs blocked by CORS)
+        console.log('[Download] Starting server-side download...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
         setDownloading(prev => [...prev, { 
           id: downloadId, 
           url: youtubeUrl,
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading...'
+          title: 'Downloading...',
+          serverSide: true
         }]);
         
         try {
-          const result = await downloadYouTubeVideoClient(
-            youtubeUrl,
-            (progressData) => {
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
-                  : dl
-              ));
-            }
-          );
+          console.log('[Download] Initiating server-side download request...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
           
-          if (result.success) {
+          const data = await res.json();
+          console.log('[Download] Server response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Server returned error:', data.error);
+            alert(`Download failed: ${data.error}\n\nPlease ensure YouTube cookies are configured on the server.`);
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-            onDownloadComplete({
-              id: downloadId,
-              videoId: result.videoId,
-              filename: `${result.videoId}.mp4`,
-              title: result.title,
-              status: 'complete',
-              localUrl: result.localUrl,
-              cached: result.cached || false
-            });
-            setYoutubeUrl('');
-          } else {
-            throw new Error(result.error || 'Download failed');
+            return;
           }
+          
+          // Update download tracking with server-provided ID
+          console.log('[Download] Download initiated, server ID:', data.id);
+          setDownloading(prev => prev.map(dl => 
+            dl.id === downloadId 
+              ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+              : dl
+          ));
+          
+          // Polling will handle progress updates and completion
         } catch (err) {
-          console.error('Client-side download error:', err);
-          
-          // Offer server-side fallback
-          const useServer = confirm(
-            `Client-side download failed: ${err.message}\n\n` +
-            `Would you like to try server-side download instead?\n` +
-            `(Requires cookies to be configured)`
-          );
-          
-          if (useServer) {
-            // Fall back to server-side download
-            try {
-              const res = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const data = await res.json();
-              
-              if (data.error) {
-                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
-                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-                return;
-              }
-              
-              // Update download tracking for server-side
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              
-              // Server-side download will be tracked via polling (existing code handles this)
-              return;
-            } catch (serverErr) {
-              console.error('Server-side download error:', serverErr);
-              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
-            }
-          }
-          
+          console.error('[Download] Server-side download initiation failed:', err);
+          alert(`Failed to start download: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
       };
@@ -1188,17 +1162,27 @@
       }, [downloading, onDownloadComplete]);
 
       const handleYoutubeDownload = async () => {
-        if (!youtubeUrl.trim()) return;
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
         
         const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
         if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
           alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
           return;
         }
         
-        // Check if already downloaded
+        // Check if already downloaded locally (IndexedDB)
+        console.log('[Download] Checking IndexedDB for existing video...');
         const existing = await getVideoFromDB(videoId);
         if (existing) {
+          console.log('[Download] Video found in local cache');
           const metadata = await getVideoMetadataFromDB(videoId);
           onDownloadComplete({
             id: videoId,
@@ -1213,87 +1197,51 @@
           return;
         }
         
-        // Start client-side download
-        const downloadId = videoId;
+        // Use server-side download (client-side APIs blocked by CORS)
+        console.log('[Download] Starting server-side download...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
         setDownloading(prev => [...prev, { 
           id: downloadId, 
           url: youtubeUrl,
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading...'
+          title: 'Downloading...',
+          serverSide: true
         }]);
         
         try {
-          const result = await downloadYouTubeVideoClient(
-            youtubeUrl,
-            (progressData) => {
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
-                  : dl
-              ));
-            }
-          );
+          console.log('[Download] Initiating server-side download request...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
           
-          if (result.success) {
+          const data = await res.json();
+          console.log('[Download] Server response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Server returned error:', data.error);
+            alert(`Download failed: ${data.error}\n\nPlease ensure YouTube cookies are configured on the server.`);
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-            onDownloadComplete({
-              id: downloadId,
-              videoId: result.videoId,
-              filename: `${result.videoId}.mp4`,
-              title: result.title,
-              status: 'complete',
-              localUrl: result.localUrl,
-              cached: result.cached || false
-            });
-            setYoutubeUrl('');
-          } else {
-            throw new Error(result.error || 'Download failed');
+            return;
           }
+          
+          // Update download tracking with server-provided ID
+          console.log('[Download] Download initiated, server ID:', data.id);
+          setDownloading(prev => prev.map(dl => 
+            dl.id === downloadId 
+              ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+              : dl
+          ));
+          
+          // Polling will handle progress updates and completion
         } catch (err) {
-          console.error('Client-side download error:', err);
-          
-          // Offer server-side fallback
-          const useServer = confirm(
-            `Client-side download failed: ${err.message}\n\n` +
-            `Would you like to try server-side download instead?\n` +
-            `(Requires cookies to be configured)`
-          );
-          
-          if (useServer) {
-            // Fall back to server-side download
-            try {
-              const res = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const data = await res.json();
-              
-              if (data.error) {
-                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
-                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-                return;
-              }
-              
-              // Update download tracking for server-side
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              
-              // Server-side download will be tracked via polling (existing code handles this)
-              return;
-            } catch (serverErr) {
-              console.error('Server-side download error:', serverErr);
-              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
-            }
-          }
-          
+          console.error('[Download] Server-side download initiation failed:', err);
+          alert(`Failed to start download: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
       };
@@ -1948,17 +1896,27 @@
       }, [downloading, onDownloadComplete]);
 
       const handleYoutubeDownload = async () => {
-        if (!youtubeUrl.trim()) return;
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
         
         const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
         if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
           alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
           return;
         }
         
-        // Check if already downloaded
+        // Check if already downloaded locally (IndexedDB)
+        console.log('[Download] Checking IndexedDB for existing video...');
         const existing = await getVideoFromDB(videoId);
         if (existing) {
+          console.log('[Download] Video found in local cache');
           const metadata = await getVideoMetadataFromDB(videoId);
           onDownloadComplete({
             id: videoId,
@@ -1973,87 +1931,51 @@
           return;
         }
         
-        // Start client-side download
-        const downloadId = videoId;
+        // Use server-side download (client-side APIs blocked by CORS)
+        console.log('[Download] Starting server-side download...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
         setDownloading(prev => [...prev, { 
           id: downloadId, 
           url: youtubeUrl,
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading...'
+          title: 'Downloading...',
+          serverSide: true
         }]);
         
         try {
-          const result = await downloadYouTubeVideoClient(
-            youtubeUrl,
-            (progressData) => {
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, progress: progressData.percentage, status: 'downloading' }
-                  : dl
-              ));
-            }
-          );
+          console.log('[Download] Initiating server-side download request...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
           
-          if (result.success) {
+          const data = await res.json();
+          console.log('[Download] Server response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Server returned error:', data.error);
+            alert(`Download failed: ${data.error}\n\nPlease ensure YouTube cookies are configured on the server.`);
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-            onDownloadComplete({
-              id: downloadId,
-              videoId: result.videoId,
-              filename: `${result.videoId}.mp4`,
-              title: result.title,
-              status: 'complete',
-              localUrl: result.localUrl,
-              cached: result.cached || false
-            });
-            setYoutubeUrl('');
-          } else {
-            throw new Error(result.error || 'Download failed');
+            return;
           }
+          
+          // Update download tracking with server-provided ID
+          console.log('[Download] Download initiated, server ID:', data.id);
+          setDownloading(prev => prev.map(dl => 
+            dl.id === downloadId 
+              ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+              : dl
+          ));
+          
+          // Polling will handle progress updates and completion
         } catch (err) {
-          console.error('Client-side download error:', err);
-          
-          // Offer server-side fallback
-          const useServer = confirm(
-            `Client-side download failed: ${err.message}\n\n` +
-            `Would you like to try server-side download instead?\n` +
-            `(Requires cookies to be configured)`
-          );
-          
-          if (useServer) {
-            // Fall back to server-side download
-            try {
-              const res = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const data = await res.json();
-              
-              if (data.error) {
-                alert(`Server-side download also failed: ${data.error}\n\nPlease configure YouTube cookies or try again later.`);
-                setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-                return;
-              }
-              
-              // Update download tracking for server-side
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              
-              // Server-side download will be tracked via polling (existing code handles this)
-              return;
-            } catch (serverErr) {
-              console.error('Server-side download error:', serverErr);
-              alert(`Both client-side and server-side downloads failed. Please check your connection and try again.`);
-            }
-          }
-          
+          console.error('[Download] Server-side download initiation failed:', err);
+          alert(`Failed to start download: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
       };
