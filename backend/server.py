@@ -123,10 +123,12 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use android client to avoid JavaScript requirement and bot detection
+        # Use ios client with additional options to avoid bot detection
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android",  # Use Android client (no JS needed, less bot detection)
+            "--extractor-args", "youtube:player_client=ios",  # Use iOS client (less bot detection)
+            "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",  # iOS user agent
+            "--referer", "https://www.youtube.com/",  # Set referer
             "--dump-json",
             "--no-download",
             url
@@ -143,10 +145,12 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use android client to avoid JavaScript requirement and bot detection
+        # Use ios client with additional options to avoid bot detection
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android",  # Use Android client (no JS needed, less bot detection)
+            "--extractor-args", "youtube:player_client=ios",  # Use iOS client (less bot detection than android)
+            "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",  # iOS user agent
+            "--referer", "https://www.youtube.com/",  # Set referer
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
             "--merge-output-format", "mp4",  # Merge into mp4
             "-o", str(output_path),  # Direct output path
@@ -298,9 +302,23 @@ def start_download():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
     
+    # Clean and validate URL
+    url = url.strip()
+    
+    # Check if it's actually an error message (starts with brackets or contains error text)
+    if url.startswith('[') or 'ERROR:' in url or 'WARNING:' in url:
+        return jsonify({"error": "Invalid URL provided. Please enter a valid YouTube URL."}), 400
+    
     # Validate it looks like a YouTube URL
     if "youtube.com" not in url and "youtu.be" not in url:
         return jsonify({"error": "Please provide a YouTube URL"}), 400
+    
+    # Extract video ID to ensure it's a valid YouTube URL format
+    import re
+    youtube_pattern = r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(youtube_pattern, url)
+    if not match:
+        return jsonify({"error": "Invalid YouTube URL format"}), 400
     
     # Check if video already exists in shared storage
     existing_video = get_video_by_youtube_url(url)
