@@ -123,12 +123,13 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
-        # Use ios client with additional options to avoid bot detection
+        # Use mweb (mobile web) client with additional options to avoid bot detection
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=ios",  # Use iOS client (less bot detection)
-            "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",  # iOS user agent
+            "--extractor-args", "youtube:player_client=mweb",  # Use mobile web client
+            "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
             "--referer", "https://www.youtube.com/",  # Set referer
+            "--no-check-certificate",  # Skip cert checks (sometimes helps)
             "--dump-json",
             "--no-download",
             url
@@ -145,12 +146,13 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
-        # Use ios client with additional options to avoid bot detection
+        # Use mweb (mobile web) client with additional options to avoid bot detection
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=ios",  # Use iOS client (less bot detection than android)
-            "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",  # iOS user agent
+            "--extractor-args", "youtube:player_client=mweb",  # Use mobile web client
+            "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
             "--referer", "https://www.youtube.com/",  # Set referer
+            "--no-check-certificate",  # Skip cert checks (sometimes helps)
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
             "--merge-output-format", "mp4",  # Merge into mp4
             "-o", str(output_path),  # Direct output path
