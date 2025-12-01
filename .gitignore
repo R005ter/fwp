@@ -49,3 +49,6 @@ backend/fireworks.db
 *.tmp
 *.temp
 
+# YouTube cookies (contains authentication)
+backend/youtube_cookies.txt
+

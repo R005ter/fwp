@@ -64,6 +64,19 @@ else:
 VIDEOS_DIR = Path(__file__).parent / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 
+# Cookies file for YouTube (to avoid bot detection)
+COOKIES_FILE = Path(__file__).parent / "youtube_cookies.txt"
+# Check if cookies are provided via environment variable (base64 encoded)
+COOKIES_ENV = os.environ.get('YOUTUBE_COOKIES')
+if COOKIES_ENV and not COOKIES_FILE.exists():
+    try:
+        import base64
+        cookies_data = base64.b64decode(COOKIES_ENV).decode('utf-8')
+        COOKIES_FILE.write_text(cookies_data)
+        print("✓ YouTube cookies loaded from environment variable")
+    except Exception as e:
+        print(f"⚠ Warning: Could not decode YouTube cookies from env: {e}")
+
 # Determine if we're in production (Render.com sets PORT env var)
 IS_PRODUCTION = 'RENDER' in os.environ or 'PORT' in os.environ
 
@@ -130,10 +143,18 @@ def run_ytdlp(video_id, url):
             "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
             "--referer", "https://www.youtube.com/",  # Set referer
             "--no-check-certificate",  # Skip cert checks (sometimes helps)
+        ]
+        
+        # Add cookies if available
+        if COOKIES_FILE.exists():
+            info_cmd.extend(["--cookies", str(COOKIES_FILE)])
+            print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+        
+        info_cmd.extend([
             "--dump-json",
             "--no-download",
             url
-        ]
+        ])
         print(f"[{video_id}] Fetching video info...")
         info_result = subprocess.run(info_cmd, capture_output=True, text=True)
         
@@ -153,13 +174,21 @@ def run_ytdlp(video_id, url):
             "--user-agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",  # Android mobile user agent
             "--referer", "https://www.youtube.com/",  # Set referer
             "--no-check-certificate",  # Skip cert checks (sometimes helps)
+        ]
+        
+        # Add cookies if available
+        if COOKIES_FILE.exists():
+            cmd.extend(["--cookies", str(COOKIES_FILE)])
+            print(f"[{video_id}] Using cookies file: {COOKIES_FILE}")
+        
+        cmd.extend([
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
             "--merge-output-format", "mp4",  # Merge into mp4
             "-o", str(output_path),  # Direct output path
             "--no-playlist",
             "--progress",  # Show progress
             url
-        ]
+        ])
         
         # Add FFmpeg location if we found it
         if FFMPEG_PATH:
