@@ -123,8 +123,10 @@ def run_ytdlp(video_id, url):
     
     try:
         # First, get video info
+        # Use android client to avoid JavaScript requirement and bot detection
         info_cmd = [
             "yt-dlp",
+            "--extractor-args", "youtube:player_client=android",  # Use Android client (no JS needed, less bot detection)
             "--dump-json",
             "--no-download",
             url
@@ -141,8 +143,10 @@ def run_ytdlp(video_id, url):
             print(f"[{video_id}] stderr: {info_result.stderr}")
         
         # Now download - ensuring merged audio+video output
+        # Use android client to avoid JavaScript requirement and bot detection
         cmd = [
             "yt-dlp",
+            "--extractor-args", "youtube:player_client=android",  # Use Android client (no JS needed, less bot detection)
             "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",  # Get best mp4 video + m4a audio
             "--merge-output-format", "mp4",  # Merge into mp4
             "-o", str(output_path),  # Direct output path
