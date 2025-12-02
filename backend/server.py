@@ -881,12 +881,12 @@ def run_ytdlp(video_id, url):
                     
                     # Add to user's library
                     if video_db_id:
-                            print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
-                            add_video_to_library(user_id, video_db_id, {
-                                "title": title,
-                                "sourceUrl": youtube_url
-                            })
-                            print(f"[{video_id}] ✓ Video added to user's library successfully")
+                        print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
+                        add_video_to_library(user_id, video_db_id, {
+                            "title": title,
+                            "sourceUrl": youtube_url
+                        })
+                        print(f"[{video_id}] ✓ Video added to user's library successfully")
                         
                         # Verify it was added
                         from database import get_user_library
