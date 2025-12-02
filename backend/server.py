@@ -90,7 +90,14 @@ if COOKIES_ENV:
 #   - SOCKS5 proxy: socks5://proxy.example.com:1080
 #   - Authenticated: http://user:pass@proxy.example.com:8080
 #   - Bright Data residential: http://brd-customer-XXX-zone-YYY:password@brd.superproxy.io:33335
+#   - Bright Data Unlocker API (native proxy): Same format, but zone must be configured for Unlocker API
 YOUTUBE_PROXY = os.environ.get('YOUTUBE_PROXY')
+
+# Bright Data Unlocker API HTTP endpoint (alternative to proxy)
+# If set, will use HTTP API endpoint instead of proxy
+# Get API key from: Bright Data dashboard → Unlocker API → Overview tab
+BRIGHT_DATA_UNLOCKER_API_KEY = os.environ.get('BRIGHT_DATA_UNLOCKER_API_KEY')
+BRIGHT_DATA_UNLOCKER_ZONE = os.environ.get('BRIGHT_DATA_UNLOCKER_ZONE')  # e.g., 'fwp_proxy'
 
 def is_bright_data_proxy(proxy_url):
     """Check if proxy is Bright Data (formerly Luminati)"""
@@ -184,6 +191,10 @@ if YOUTUBE_PROXY:
             if '://' in username_part:
                 username = username_part.split('://')[1].split(':')[0]
                 print(f"  ℹ Proxy username format: {username[:50]}...")
+        print("  💡 TIP: For better YouTube success, configure your Bright Data zone for 'Unlocker API'")
+        print("     (Bright Data dashboard → Your Zone → Settings → Enable Unlocker API)")
+        if BRIGHT_DATA_UNLOCKER_API_KEY:
+            print("  ✓ Bright Data Unlocker API key detected (HTTP API endpoint available)")
 else:
     print("ℹ No YouTube proxy configured. Consider using a proxy service to avoid IP-based blocking on Render.")
 
