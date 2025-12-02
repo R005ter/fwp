@@ -101,10 +101,27 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
       console.log('  Local Backend:', LOCAL_BACKEND_URL);
       console.log('  Local Frontend:', LOCAL_FRONTEND_URL);
       
+      // Store auth token from URL or localStorage
+      let authToken = null;
+      
+      // Check URL for auth token (from OAuth redirect)
+      const urlParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = urlParams.get('token');
+      if (tokenFromUrl) {{
+        authToken = tokenFromUrl;
+        localStorage.setItem('auth_token', tokenFromUrl);
+        // Remove token from URL
+        window.history.replaceState({{}}, '', window.location.pathname + window.location.hash);
+        console.log('[Local Client] Auth token saved from OAuth redirect');
+      }} else {{
+        // Try to get token from localStorage
+        authToken = localStorage.getItem('auth_token');
+      }}
+      
       // Store original fetch
       const originalFetch = window.fetch;
       
-      // Override fetch to route YouTube downloads to local backend
+      // Override fetch to route YouTube downloads to local backend and add auth token
       window.fetch = function(url, options) {{
         // Route YouTube download endpoints to local backend
         if (typeof url === 'string' && (url.includes('/api/download') || url.startsWith(REMOTE_API_BASE + '/api/download'))) {{
@@ -113,6 +130,14 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
           console.log('[Local Client] Routing YouTube download to local backend:', localUrl);
           return originalFetch(localUrl, options);
         }}
+        
+        // For remote API calls, add auth token header if available
+        if (authToken && url.startsWith(REMOTE_API_BASE)) {{
+          if (!options) options = {{}};
+          if (!options.headers) options.headers = {{}};
+          options.headers['X-Auth-Token'] = authToken;
+        }}
+        
         // All other API calls go to remote server
         return originalFetch(url, options);
       }};
