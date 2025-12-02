@@ -320,8 +320,25 @@ def get_current_user_id():
 
 
 def require_auth():
-    """Check if user is authenticated"""
-    if not get_current_user_id():
+    """Check if user is authenticated - supports both session cookies and auth tokens"""
+    user_id = get_current_user_id()
+    
+    # If no session, try auth token from header
+    if not user_id:
+        auth_token = request.headers.get('X-Auth-Token')
+        if auth_token and hasattr(app, 'auth_tokens') and auth_token in app.auth_tokens:
+            import time
+            token_data = app.auth_tokens[auth_token]
+            # Check if token expired
+            if time.time() < token_data['expires']:
+                # Set user_id in session for this request (temporary)
+                session['user_id'] = token_data['user_id']
+                user_id = token_data['user_id']
+            else:
+                # Token expired, remove it
+                del app.auth_tokens[auth_token]
+    
+    if not user_id:
         return jsonify({"error": "Authentication required"}), 401
     return None
 
@@ -1242,8 +1259,23 @@ def logout():
 
 @app.route("/api/auth/me", methods=["GET"])
 def get_current_user():
-    """Get current user info"""
+    """Get current user info - supports both session cookies and auth tokens"""
+    # Try to get user_id from session first (web client)
     user_id = get_current_user_id()
+    
+    # If no session, try auth token (local client)
+    if not user_id:
+        auth_token = request.args.get('token') or request.headers.get('X-Auth-Token')
+        if auth_token and hasattr(app, 'auth_tokens') and auth_token in app.auth_tokens:
+            import time
+            token_data = app.auth_tokens[auth_token]
+            # Check if token expired
+            if time.time() < token_data['expires']:
+                user_id = token_data['user_id']
+            else:
+                # Token expired, remove it
+                del app.auth_tokens[auth_token]
+    
     if not user_id:
         return jsonify({"authenticated": False}), 200
     
