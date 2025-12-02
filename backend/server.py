@@ -112,6 +112,27 @@ def normalize_bright_data_proxy(proxy_url):
     
     return proxy_url
 
+def convert_to_socks5(proxy_url):
+    """Convert Bright Data HTTP proxy to SOCKS5 proxy (better for yt-dlp)"""
+    if not proxy_url or not is_bright_data_proxy(proxy_url):
+        return proxy_url
+    
+    # SOCKS5 uses port 22225, HTTP uses 33335
+    # Format: socks5://username:password@host:22225
+    if '@' in proxy_url:
+        protocol_part = proxy_url.split('://')[0] + '://'
+        rest = proxy_url.split('://')[1]
+        username_password = rest.split('@')[0]
+        host_port = rest.split('@')[1]
+        
+        # Extract host (remove port)
+        host = host_port.split(':')[0]
+        
+        # Convert to SOCKS5 format
+        return f"socks5://{username_password}@{host}:22225"
+    
+    return proxy_url
+
 def add_bright_data_session(proxy_url):
     """Add session ID to Bright Data proxy username for IP rotation"""
     if not proxy_url or not is_bright_data_proxy(proxy_url):
@@ -123,8 +144,8 @@ def add_bright_data_session(proxy_url):
     # Generate random session ID (8 characters)
     session_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     
-    # Parse proxy URL: http://username:password@host:port
-    if '@' in proxy_url:
+    # Parse proxy URL: protocol://username:password@host:port
+    if '@' in proxy_url and '://' in proxy_url:
         protocol_part = proxy_url.split('://')[0] + '://'
         rest = proxy_url.split('://')[1]
         username_password = rest.split('@')[0]
@@ -338,9 +359,12 @@ def run_ytdlp(video_id, url):
             if any(keyword in error_output for keyword in ['bot', 'sign in', 'unable to download', '403', '429', 'blocked']):
                 print(f"[{video_id}] Direct connection failed, trying with proxy...")
                 
-                # For Bright Data proxies, add session ID for IP rotation and country targeting
+                # For Bright Data proxies, try SOCKS5 first (better for yt-dlp), then HTTP as fallback
                 if BRIGHT_DATA_PROXY:
-                    proxy_to_use = add_bright_data_session(YOUTUBE_PROXY)
+                    # Try SOCKS5 first (port 22225) - works better with yt-dlp
+                    socks5_proxy = convert_to_socks5(YOUTUBE_PROXY)
+                    proxy_to_use = add_bright_data_session(socks5_proxy)
+                    print(f"[{video_id}] Trying SOCKS5 proxy first (better for yt-dlp)")
                     print(f"[{video_id}] Using session-based Bright Data proxy (new IP per request)")
                 else:
                     proxy_to_use = YOUTUBE_PROXY
@@ -377,17 +401,21 @@ def run_ytdlp(video_id, url):
                 proxy_display = proxy_to_use.split('@')[-1] if '@' in proxy_to_use else proxy_to_use
                 print(f"[{video_id}] Using proxy: {proxy_display}")
                 
-                # Bright Data proxies require disabling SSL verification due to SSL interception
-                if BRIGHT_DATA_PROXY:
+                # Bright Data HTTP proxies require disabling SSL verification due to SSL interception
+                # SOCKS5 proxies don't need this (they don't intercept SSL)
+                if BRIGHT_DATA_PROXY and proxy_to_use.startswith('http://'):
                     # Insert --no-check-certificate right after --proxy
                     proxy_info_cmd.insert(proxy_idx + 2, "--no-check-certificate")
-                    print(f"[{video_id}] SSL verification disabled for Bright Data proxy")
-                    # Log username format for debugging
-                    if '@' in proxy_to_use:
-                        username_part = proxy_to_use.split('@')[0]
-                        if '://' in username_part:
-                            username = username_part.split('://')[1].split(':')[0]
-                            print(f"[{video_id}] Proxy username: {username}")
+                    print(f"[{video_id}] SSL verification disabled for Bright Data HTTP proxy")
+                elif BRIGHT_DATA_PROXY and proxy_to_use.startswith('socks5://'):
+                    print(f"[{video_id}] Using SOCKS5 proxy (no SSL interception, no --no-check-certificate needed)")
+                
+                # Log username format for debugging
+                if '@' in proxy_to_use:
+                    username_part = proxy_to_use.split('@')[0]
+                    if '://' in username_part:
+                        username = username_part.split('://')[1].split(':')[0]
+                        print(f"[{video_id}] Proxy username: {username}")
                 
                 info_result = subprocess.run(proxy_info_cmd, capture_output=True, text=True)
                 
@@ -397,37 +425,38 @@ def run_ytdlp(video_id, url):
                 else:
                     print(f"[{video_id}] yt-dlp info fetch succeeded through proxy")
         
-        # If Bright Data proxy fails with 403, try alternative format
+        # If Bright Data SOCKS5 proxy fails, try HTTP as fallback
         if info_result.returncode != 0 and BRIGHT_DATA_PROXY and YOUTUBE_PROXY_ORIGINAL and use_proxy:
             error_output = info_result.stderr.lower()
-            if '403' in error_output or 'forbidden' in error_output or 'tunnel connection failed' in error_output:
-                print(f"[{video_id}] Proxy connection failed with 403, trying alternative format...")
-                # Try switching between http:// and https:// using original URL
-                alt_proxy = YOUTUBE_PROXY_ORIGINAL
-                if alt_proxy.startswith('https://'):
-                    alt_proxy = alt_proxy.replace('https://', 'http://', 1)
-                elif alt_proxy.startswith('http://'):
-                    alt_proxy = alt_proxy.replace('http://', 'https://', 1)
+            # If we tried SOCKS5 and it failed, try HTTP instead
+            if proxy_to_use and proxy_to_use.startswith('socks5://'):
+                print(f"[{video_id}] SOCKS5 proxy failed, trying HTTP proxy as fallback...")
+                # Convert to HTTP proxy (port 33335)
+                http_proxy = add_bright_data_session(YOUTUBE_PROXY_ORIGINAL)
                 
-                # Retry with alternative format - use proxy_info_cmd as base (it already has --proxy)
+                # Retry with HTTP format - use proxy_info_cmd as base (it already has --proxy)
                 alt_info_cmd = proxy_info_cmd.copy()
                 # Replace proxy argument
                 try:
                     proxy_idx = alt_info_cmd.index("--proxy")
-                    alt_info_cmd[proxy_idx + 1] = alt_proxy
-                    # Also update --no-check-certificate if present
-                    if "--no-check-certificate" in alt_info_cmd:
-                        # Keep it, Bright Data still needs it
-                        pass
-                    print(f"[{video_id}] Retrying with proxy: {alt_proxy.split('@')[-1] if '@' in alt_proxy else alt_proxy}")
+                    alt_info_cmd[proxy_idx + 1] = http_proxy
+                    # Add --no-check-certificate for HTTP proxy (SOCKS5 doesn't need it, but HTTP does)
+                    if "--no-check-certificate" not in alt_info_cmd:
+                        alt_info_cmd.insert(proxy_idx + 2, "--no-check-certificate")
+                    http_display = http_proxy.split('@')[-1] if '@' in http_proxy else http_proxy
+                    print(f"[{video_id}] Retrying with HTTP proxy: {http_display}")
+                    print(f"[{video_id}] Adding --no-check-certificate for HTTP proxy")
                     info_result = subprocess.run(alt_info_cmd, capture_output=True, text=True)
                     if info_result.returncode == 0:
-                        proxy_to_use = alt_proxy  # Use the working format for download
-                        print(f"[{video_id}] Alternative proxy format succeeded!")
+                        proxy_to_use = http_proxy  # Use the working format for download
+                        print(f"[{video_id}] HTTP proxy succeeded!")
                     else:
-                        print(f"[{video_id}] Alternative proxy format also failed: {info_result.stderr[:500]}")
+                        print(f"[{video_id}] HTTP proxy also failed: {info_result.stderr[:500]}")
                 except ValueError:
                     print(f"[{video_id}] ERROR: Could not find --proxy in command for retry")
+            elif '403' in error_output or 'forbidden' in error_output or 'tunnel connection failed' in error_output:
+                print(f"[{video_id}] Proxy connection failed with 403/forbidden error")
+                print(f"[{video_id}] This may indicate YouTube is blocking Bright Data proxy IPs")
         
         # If mweb client fails with PO Token or format issues, try android client as fallback
         if info_result.returncode != 0 and player_client == "mweb" and has_cookies:
@@ -455,7 +484,9 @@ def run_ytdlp(video_id, url):
                 # Add proxy if we were using it
                 if proxy_to_use and use_proxy:
                     android_info_cmd.extend(["--proxy", proxy_to_use])
-                    if BRIGHT_DATA_PROXY:
+                    # Bright Data HTTP proxies require disabling SSL verification
+                    # SOCKS5 proxies don't need this
+                    if BRIGHT_DATA_PROXY and proxy_to_use.startswith('http://'):
                         android_info_cmd.extend(["--no-check-certificate"])
                 
                 android_info_cmd.extend([
@@ -516,8 +547,9 @@ def run_ytdlp(video_id, url):
         # Add proxy if we used it successfully for info fetch
         if proxy_to_use and use_proxy:
             cmd.extend(["--proxy", proxy_to_use])
-            # Bright Data proxies require disabling SSL verification due to SSL interception
-            if BRIGHT_DATA_PROXY:
+            # Bright Data HTTP proxies require disabling SSL verification due to SSL interception
+            # SOCKS5 proxies don't need this (they don't intercept SSL)
+            if BRIGHT_DATA_PROXY and proxy_to_use.startswith('http://'):
                 cmd.extend(["--no-check-certificate"])
         
         # Add cookies if available and using mweb client (android doesn't support cookies)
