@@ -32,9 +32,46 @@ def get_db():
     if USE_POSTGRES:
         # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
         # Use RealDictCursor to get dict-like rows (similar to SQLite Row)
-        # Supabase connection strings work as-is (SSL is handled automatically)
-        # If you need to add SSL parameters, append ?sslmode=require to the URL
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        # Supabase requires SSL and may have IPv6 connectivity issues on Render
+        import urllib.parse
+        
+        parsed = urllib.parse.urlparse(DATABASE_URL)
+        is_supabase = 'supabase' in (parsed.hostname or '').lower()
+        
+        if is_supabase:
+            # Supabase: Use connection pooling URL or add SSL parameters
+            # Parse connection string to extract components
+            host = parsed.hostname
+            port = parsed.port or 5432
+            database = parsed.path.lstrip('/')
+            user = parsed.username
+            password = parsed.password
+            
+            # Try connecting with explicit parameters (avoids IPv6 issues)
+            # Supabase requires SSL
+            try:
+                conn = psycopg2.connect(
+                    host=host,
+                    port=port,
+                    database=database,
+                    user=user,
+                    password=password,
+                    sslmode='require',
+                    cursor_factory=RealDictCursor
+                )
+            except psycopg2.OperationalError as e:
+                # If direct connection fails, try with connection pooling URL
+                # Supabase connection pooling uses port 6543 (transaction mode)
+                # or pooler URL format
+                print(f"⚠ Direct connection failed: {str(e)}")
+                print("💡 Tip: For Supabase on Render, use Connection Pooling URL:")
+                print("   Settings → Database → Connection pooling → Transaction mode")
+                print("   Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:6543/postgres")
+                raise
+        else:
+            # Regular PostgreSQL connection
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        
         return conn
     else:
         conn = sqlite3.connect(DB_PATH)
