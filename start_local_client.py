@@ -100,11 +100,24 @@ def start_backend():
     """Start the backend server in local downloader mode"""
     print(f"Starting backend server on port {LOCAL_BACKEND_PORT}...")
     
-    # Change to backend directory
-    os.chdir(BACKEND_DIR)
+    # Save current directory
+    original_dir = os.getcwd()
     
-    # Start Flask server
     try:
+        # Add backend to Python path
+        backend_path = str(BACKEND_DIR)
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+        
+        # Change to backend directory for relative imports (like database.py)
+        if BACKEND_DIR.exists():
+            os.chdir(BACKEND_DIR)
+        else:
+            print(f"WARNING: Backend directory not found: {BACKEND_DIR}")
+            print(f"Current directory: {os.getcwd()}")
+            print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+        
+        # Start Flask server
         from server import app
         app.run(host='0.0.0.0', port=LOCAL_BACKEND_PORT, debug=False, use_reloader=False)
     except KeyboardInterrupt:
@@ -113,6 +126,9 @@ def start_backend():
         print(f"Backend error: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Restore original directory
+        os.chdir(original_dir)
 
 def start_frontend():
     """Start the frontend server"""
