@@ -99,8 +99,31 @@ def is_bright_data_proxy(proxy_url):
     bright_data_hosts = ['brd.superproxy.io', 'lum-superproxy.io', 'zproxy.lum-superproxy.io']
     return any(host in proxy_url for host in bright_data_hosts)
 
+def normalize_bright_data_proxy(proxy_url):
+    """Normalize Bright Data proxy URL - try https:// if http:// fails"""
+    if not proxy_url or not is_bright_data_proxy(proxy_url):
+        return proxy_url
+    
+    # If already https://, return as-is
+    if proxy_url.startswith('https://'):
+        return proxy_url
+    
+    # If http://, try converting to https:// for HTTPS destinations
+    # Some Bright Data configurations work better with https:// for the proxy URL
+    if proxy_url.startswith('http://'):
+        return proxy_url.replace('http://', 'https://', 1)
+    
+    return proxy_url
+
 # Bright Data proxies do SSL interception, so we need to disable SSL verification
 BRIGHT_DATA_PROXY = is_bright_data_proxy(YOUTUBE_PROXY) if YOUTUBE_PROXY else False
+
+# Store original proxy URL for fallback retries
+YOUTUBE_PROXY_ORIGINAL = YOUTUBE_PROXY
+
+# Normalize Bright Data proxy URL (try https:// first for HTTPS destinations)
+if BRIGHT_DATA_PROXY:
+    YOUTUBE_PROXY = normalize_bright_data_proxy(YOUTUBE_PROXY)
 
 if YOUTUBE_PROXY:
     proxy_display = YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY
@@ -108,6 +131,12 @@ if YOUTUBE_PROXY:
     print(f"✓ YouTube {proxy_type} configured: {proxy_display}")
     if BRIGHT_DATA_PROXY:
         print("  ℹ SSL verification will be disabled for Bright Data proxy (required for SSL interception)")
+        # Log username format for debugging (without password)
+        if '@' in YOUTUBE_PROXY:
+            username_part = YOUTUBE_PROXY.split('@')[0]
+            if '://' in username_part:
+                username = username_part.split('://')[1].split(':')[0]
+                print(f"  ℹ Proxy username format: {username[:50]}...")
 else:
     print("ℹ No YouTube proxy configured. Consider using a proxy service to avoid IP-based blocking on Render.")
 
@@ -250,14 +279,21 @@ def run_ytdlp(video_id, url):
         ]
         
         # Add proxy if configured
+        proxy_to_use = YOUTUBE_PROXY
         if YOUTUBE_PROXY:
-            info_cmd.extend(["--proxy", YOUTUBE_PROXY])
-            proxy_display = YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY
+            info_cmd.extend(["--proxy", proxy_to_use])
+            proxy_display = proxy_to_use.split('@')[-1] if '@' in proxy_to_use else proxy_to_use
             print(f"[{video_id}] Using proxy: {proxy_display}")
             # Bright Data proxies require disabling SSL verification due to SSL interception
             if BRIGHT_DATA_PROXY:
                 info_cmd.extend(["--no-check-certificate"])
                 print(f"[{video_id}] SSL verification disabled for Bright Data proxy")
+                # Log username format for debugging
+                if '@' in proxy_to_use:
+                    username_part = proxy_to_use.split('@')[0]
+                    if '://' in username_part:
+                        username = username_part.split('://')[1].split(':')[0]
+                        print(f"[{video_id}] Proxy username: {username}")
         
         # Add cookies if available
         if has_cookies:
@@ -274,6 +310,28 @@ def run_ytdlp(video_id, url):
         print(f"[{video_id}] Fetching video info...")
         info_result = subprocess.run(info_cmd, capture_output=True, text=True)
         
+        # If Bright Data proxy fails with 403, try alternative format
+        if info_result.returncode != 0 and BRIGHT_DATA_PROXY and YOUTUBE_PROXY_ORIGINAL:
+            error_output = info_result.stderr.lower()
+            if '403' in error_output or 'forbidden' in error_output or 'tunnel connection failed' in error_output:
+                print(f"[{video_id}] Proxy connection failed with 403, trying alternative format...")
+                # Try switching between http:// and https:// using original URL
+                alt_proxy = YOUTUBE_PROXY_ORIGINAL
+                if alt_proxy.startswith('https://'):
+                    alt_proxy = alt_proxy.replace('https://', 'http://', 1)
+                elif alt_proxy.startswith('http://'):
+                    alt_proxy = alt_proxy.replace('http://', 'https://', 1)
+                
+                # Retry with alternative format
+                alt_info_cmd = info_cmd.copy()
+                # Replace proxy argument
+                proxy_idx = alt_info_cmd.index("--proxy")
+                alt_info_cmd[proxy_idx + 1] = alt_proxy
+                print(f"[{video_id}] Retrying with proxy: {alt_proxy.split('@')[-1] if '@' in alt_proxy else alt_proxy}")
+                info_result = subprocess.run(alt_info_cmd, capture_output=True, text=True)
+                if info_result.returncode == 0:
+                    proxy_to_use = alt_proxy  # Use the working format for download
+        
         if info_result.returncode == 0:
             info = json.loads(info_result.stdout)
             downloads[video_id]["title"] = info.get("title", "Unknown")
@@ -281,6 +339,22 @@ def run_ytdlp(video_id, url):
         else:
             print(f"[{video_id}] Warning: Could not fetch video info")
             print(f"[{video_id}] stderr: {info_result.stderr}")
+            # Log more details for Bright Data 403 errors
+            if BRIGHT_DATA_PROXY and ('403' in info_result.stderr or 'forbidden' in info_result.stderr.lower()):
+                print(f"[{video_id}] ERROR: Bright Data proxy authentication failed (403 Forbidden)")
+                print(f"[{video_id}] Please verify:")
+                print(f"[{video_id}]   1. Username format: brd-customer-<customer_id>-zone-<zone_name>")
+                print(f"[{video_id}]   2. Password is correct")
+                # Extract zone name from username for better error message
+                zone_name = "unknown"
+                if '@' in proxy_to_use:
+                    username_part = proxy_to_use.split('@')[0]
+                    if '://' in username_part:
+                        username = username_part.split('://')[1].split(':')[0]
+                        if 'zone-' in username:
+                            zone_name = username.split('zone-')[-1]
+                print(f"[{video_id}]   3. Zone '{zone_name}' exists in Bright Data dashboard")
+                print(f"[{video_id}]   4. Zone is active and configured for residential proxies")
         
         # Now download - ensuring merged audio+video output
         # Use same client and extractor args as info fetch
@@ -297,9 +371,9 @@ def run_ytdlp(video_id, url):
             "--add-header", "Upgrade-Insecure-Requests:1",
         ]
         
-        # Add proxy if configured
+        # Add proxy if configured (use the working format from info fetch if retry succeeded)
         if YOUTUBE_PROXY:
-            cmd.extend(["--proxy", YOUTUBE_PROXY])
+            cmd.extend(["--proxy", proxy_to_use])
             # Bright Data proxies require disabling SSL verification due to SSL interception
             if BRIGHT_DATA_PROXY:
                 cmd.extend(["--no-check-certificate"])
