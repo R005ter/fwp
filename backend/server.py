@@ -845,7 +845,7 @@ def run_ytdlp(video_id, url):
                     return
                 
                 try:
-                    # If in local downloader mode, upload to remote server instead of saving locally
+                    # If in local downloader mode, try to upload to remote server first
                     if LOCAL_DOWNLOADER_MODE and REMOTE_SERVER_URL:
                         print(f"[{video_id}] Local downloader mode: Uploading to remote server...")
                         upload_success = upload_video_to_remote(output_path, filename, youtube_url, title, user_id, video_id)
@@ -857,9 +857,15 @@ def run_ytdlp(video_id, url):
                                 print(f"[{video_id}] Local file cleaned up")
                             except Exception as e:
                                 print(f"[{video_id}] Warning: Could not delete local file: {e}")
+                            # Remote upload succeeded, don't register locally
+                            downloads[video_id]["status"] = "complete"
+                            return
                         else:
-                            raise Exception("Failed to upload video to remote server")
-                    else:
+                            print(f"[{video_id}] ⚠ Remote upload failed, falling back to local registration")
+                            # Fall through to local registration
+                    
+                    # Normal mode or fallback: Save locally and register in database
+                    if True:  # Always execute this block
                         # Normal mode: Save locally and register in database
                         # Check if video already exists (shouldn't happen, but just in case)
                         existing = get_video_by_youtube_url(youtube_url)
