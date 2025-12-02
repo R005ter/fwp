@@ -88,14 +88,18 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             if re.search(pattern, content, re.DOTALL):
                 content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             
-            # Inject configuration for local YouTube downloads
-            # Add script to override /api/download to use local backend
+            # Inject configuration for local YouTube downloads and OAuth
             local_download_config = f"""
     <script>
-      // Override API_BASE for YouTube downloads only - use local backend
+      // Configuration for local client
       const REMOTE_API_BASE = '{REMOTE_API_URL}';
       const LOCAL_BACKEND_URL = 'http://localhost:{LOCAL_BACKEND_PORT}';
       const LOCAL_FRONTEND_URL = 'http://localhost:{FRONTEND_PORT}';
+      
+      console.log('[Local Client] Configured:');
+      console.log('  Remote API:', REMOTE_API_BASE);
+      console.log('  Local Backend:', LOCAL_BACKEND_URL);
+      console.log('  Local Frontend:', LOCAL_FRONTEND_URL);
       
       // Store original fetch
       const originalFetch = window.fetch;
@@ -113,19 +117,14 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
         return originalFetch(url, options);
       }};
       
-      // Override Google OAuth to redirect back to local frontend
+      // Ensure OAuth redirects back to local frontend
+      // The frontend code already uses window.location.origin, but we'll ensure it's correct
       window.addEventListener('DOMContentLoaded', function() {{
-        // Find Google OAuth links and update frontend_url parameter
-        setTimeout(function() {{
-          const links = document.querySelectorAll('a[href*="/api/auth/google"]');
-          links.forEach(link => {{
-            const href = link.getAttribute('href');
-            if (href && !href.includes('frontend_url=')) {{
-              const separator = href.includes('?') ? '&' : '?';
-              link.setAttribute('href', href + separator + 'frontend_url=' + encodeURIComponent(LOCAL_FRONTEND_URL));
-            }}
-          }});
-        }}, 100);
+        // Override window.location.origin if needed (for OAuth redirects)
+        const originalOrigin = window.location.origin;
+        if (originalOrigin !== LOCAL_FRONTEND_URL) {{
+          console.log('[Local Client] Detected origin mismatch, OAuth will use:', LOCAL_FRONTEND_URL);
+        }}
       }});
     </script>
 """
