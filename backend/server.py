@@ -856,10 +856,17 @@ def run_ytdlp(video_id, url):
 
 @app.route("/api/download", methods=["POST"])
 def start_download():
-    """Start downloading a YouTube video"""
+    """Start downloading a YouTube video (only available in local client mode)"""
     auth_error = require_auth()
     if auth_error:
         return auth_error
+    
+    # Disable YouTube downloads on web client (Render)
+    if IS_WEB_CLIENT:
+        return jsonify({
+            "error": "YouTube downloads are disabled on the web client. Please use the local client to download YouTube videos.",
+            "help": "Set LOCAL_DOWNLOADER_MODE=true to enable YouTube downloads locally."
+        }), 403
     
     data = request.json
     url = data.get("url")
