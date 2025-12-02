@@ -14,7 +14,73 @@ This guide explains how to set up a shared PostgreSQL database so your local and
 - ✅ Library changes sync automatically
 - ✅ Single source of truth for all data
 
-## Step 1: Create PostgreSQL Database on Render
+## Database Options
+
+You can use either:
+- **Supabase** (Recommended) - Free tier, no expiration, great for production
+- **Render PostgreSQL** - Free tier, expires after 90 days
+
+---
+
+## Option A: Supabase Setup (Recommended)
+
+### Step 1: Get Supabase Connection String
+
+1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+2. Select your project
+3. Go to **Settings** → **Database**
+4. Under **Connection string**, find **"URI"** or **"Connection pooling"**
+5. Copy the connection string - it will look like:
+   ```
+   postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+   ```
+   Or for connection pooling (recommended for serverless):
+   ```
+   postgres://postgres.[PROJECT-REF]:[YOUR-PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+   ```
+
+**Important:** Replace `[YOUR-PASSWORD]` with your actual database password (found in Settings → Database → Database password)
+
+### Step 2: Configure Render Web Service
+
+1. Go to your web service in Render Dashboard
+2. Go to **"Environment"** tab
+3. Add environment variable:
+   - **Key:** `DATABASE_URL`
+   - **Value:** Your Supabase connection string
+4. Click **"Save Changes"**
+5. Render will automatically redeploy
+
+### Step 3: Configure Local Development
+
+Add to `backend/.env`:
+```
+DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+```
+
+**Note:** Supabase requires SSL connections. The connection string should work as-is.
+
+### Step 4: Install PostgreSQL Driver Locally
+
+```powershell
+cd backend
+pip install psycopg2-binary
+```
+
+### Step 5: Test Connection
+
+1. Restart your local server
+2. Check logs - you should see:
+   ```
+   ✓ Using PostgreSQL database (shared)
+   ✅ Database initialized
+   ```
+
+---
+
+## Option B: Render PostgreSQL Setup
+
+### Step 1: Create PostgreSQL Database on Render
 
 1. Go to [Render Dashboard](https://dashboard.render.com/)
 2. Click **"New +"** → **"PostgreSQL"**
@@ -135,19 +201,23 @@ pip install psycopg2-binary
 - Check that `init_db()` is being called
 - Look for "Database initialized" message in logs
 
-## Free Tier Limits
+## Free Tier Comparison
 
-**Render PostgreSQL Free Tier:**
+### Supabase Free Tier:
+- ✅ 500 MB database storage
+- ✅ Unlimited connections
+- ✅ **No expiration** (free forever)
+- ✅ Connection pooling included
+- ✅ Built-in backups
+- ✅ Great for production
+
+### Render PostgreSQL Free Tier:
 - ✅ 1 GB storage
 - ✅ Unlimited connections
-- ✅ 90 days free (then $7/month)
+- ⚠️ **90 days free** (then $7/month)
 - ⚠️ Database expires after 90 days if not upgraded
 
-**For Production:** Consider upgrading to paid tier ($7/month) for:
-- More storage
-- No expiration
-- Better performance
-- Backups
+**Recommendation:** Use Supabase for production - no expiration and better free tier!
 
 ## Benefits
 
@@ -159,11 +229,29 @@ pip install psycopg2-binary
 
 ## Next Steps
 
-1. ✅ Create PostgreSQL database on Render
+**For Supabase:**
+1. ✅ Get connection string from Supabase Dashboard
 2. ✅ Set `DATABASE_URL` on Render web service
 3. ✅ Set `DATABASE_URL` in local `.env`
 4. ✅ Install `psycopg2-binary` locally
 5. ✅ Restart servers and test!
 
+**For Render PostgreSQL:**
+1. ✅ Create PostgreSQL database on Render
+2. ✅ Set `DATABASE_URL` on Render web service
+3. ✅ Set `DATABASE_URL` in local `.env` (use External URL)
+4. ✅ Install `psycopg2-binary` locally
+5. ✅ Restart servers and test!
+
 Your local and Render instances will now share the same database! 🎉
+
+## SSL Connection (Supabase)
+
+Supabase requires SSL connections. The `psycopg2` driver handles this automatically, but if you encounter SSL errors, you may need to add SSL parameters to your connection string:
+
+```
+postgresql://postgres:password@host:5432/postgres?sslmode=require
+```
+
+The standard Supabase connection string should work without modification.
 
