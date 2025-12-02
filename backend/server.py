@@ -100,18 +100,15 @@ def is_bright_data_proxy(proxy_url):
     return any(host in proxy_url for host in bright_data_hosts)
 
 def normalize_bright_data_proxy(proxy_url):
-    """Normalize Bright Data proxy URL - try https:// if http:// fails"""
+    """Normalize Bright Data proxy URL - ensure http:// format for residential proxies"""
     if not proxy_url or not is_bright_data_proxy(proxy_url):
         return proxy_url
     
-    # If already https://, return as-is
+    # Bright Data residential proxies use http:// format (not https://)
+    # Even though we're connecting to HTTPS destinations, the proxy URL itself should be http://
     if proxy_url.startswith('https://'):
-        return proxy_url
-    
-    # If http://, try converting to https:// for HTTPS destinations
-    # Some Bright Data configurations work better with https:// for the proxy URL
-    if proxy_url.startswith('http://'):
-        return proxy_url.replace('http://', 'https://', 1)
+        # Convert https:// back to http:// for Bright Data residential proxies
+        return proxy_url.replace('https://', 'http://', 1)
     
     return proxy_url
 
