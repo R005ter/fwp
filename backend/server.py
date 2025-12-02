@@ -90,6 +90,7 @@ if COOKIES_ENV:
 #   - SOCKS5 proxy: socks5://proxy.example.com:1080
 #   - Authenticated: http://user:pass@proxy.example.com:8080
 #   - Bright Data residential: http://brd-customer-XXX-zone-YYY:password@brd.superproxy.io:33335
+#   - Bright Data ISP: http://brd-customer-XXX-zone-isp_YYY:password@brd.superproxy.io:33335
 #   - Bright Data Unlocker API (native proxy): Same format, but zone must be configured for Unlocker API
 YOUTUBE_PROXY = os.environ.get('YOUTUBE_PROXY')
 
@@ -107,14 +108,14 @@ def is_bright_data_proxy(proxy_url):
     return any(host in proxy_url for host in bright_data_hosts)
 
 def normalize_bright_data_proxy(proxy_url):
-    """Normalize Bright Data proxy URL - ensure http:// format for residential proxies"""
+    """Normalize Bright Data proxy URL - ensure http:// format for residential/ISP proxies"""
     if not proxy_url or not is_bright_data_proxy(proxy_url):
         return proxy_url
     
-    # Bright Data residential proxies use http:// format (not https://)
+    # Bright Data residential/ISP proxies use http:// format (not https://)
     # Even though we're connecting to HTTPS destinations, the proxy URL itself should be http://
     if proxy_url.startswith('https://'):
-        # Convert https:// back to http:// for Bright Data residential proxies
+        # Convert https:// back to http:// for Bright Data proxies
         return proxy_url.replace('https://', 'http://', 1)
     
     return proxy_url
@@ -212,7 +213,24 @@ if BRIGHT_DATA_PROXY:
 
 if YOUTUBE_PROXY:
     proxy_display = YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY
-    proxy_type = "Bright Data residential" if BRIGHT_DATA_PROXY else "proxy"
+    # Detect proxy type from username or port
+    proxy_type = "proxy"
+    if BRIGHT_DATA_PROXY:
+        # Check if it's ISP proxy (usually has 'isp' in zone name or uses different indicators)
+        username_part = ""
+        if '@' in YOUTUBE_PROXY:
+            username_part = YOUTUBE_PROXY.split('@')[0]
+            if '://' in username_part:
+                username = username_part.split('://')[1].split(':')[0]
+                if 'isp' in username.lower() or 'datacenter' in username.lower():
+                    proxy_type = "Bright Data ISP"
+                else:
+                    proxy_type = "Bright Data residential"
+            else:
+                proxy_type = "Bright Data residential"
+        else:
+            proxy_type = "Bright Data residential"
+    
     print(f"✓ YouTube {proxy_type} configured: {proxy_display}")
     if BRIGHT_DATA_PROXY:
         print("  ℹ SSL verification will be disabled for Bright Data proxy (required for SSL interception)")
