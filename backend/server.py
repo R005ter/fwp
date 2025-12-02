@@ -65,6 +65,11 @@ else:
 VIDEOS_DIR = Path(__file__).parent / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 
+# Local downloader mode: Download videos locally but upload to remote server
+# Set LOCAL_DOWNLOADER_MODE=true and REMOTE_SERVER_URL=https://your-server.onrender.com
+LOCAL_DOWNLOADER_MODE = os.environ.get('LOCAL_DOWNLOADER_MODE', '').lower() == 'true'
+REMOTE_SERVER_URL = os.environ.get('REMOTE_SERVER_URL', '').strip().rstrip('/')
+
 # Cookies file for YouTube (to avoid bot detection)
 COOKIES_FILE = Path(__file__).parent / "youtube_cookies.txt"
 # Check if cookies are provided via environment variable (base64 encoded)
@@ -307,6 +312,53 @@ def require_auth():
     if not get_current_user_id():
         return jsonify({"error": "Authentication required"}), 401
     return None
+
+def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, video_id):
+    """Upload video file to remote server"""
+    if not REMOTE_SERVER_URL:
+        print(f"[{video_id}] ERROR: REMOTE_SERVER_URL not configured")
+        return False
+    
+    try:
+        upload_url = f"{REMOTE_SERVER_URL}/api/upload-video"
+        
+        # Read file in chunks for large files
+        with open(file_path, 'rb') as f:
+            files = {'video': (filename, f, 'video/mp4')}
+            data = {
+                'youtube_url': youtube_url,
+                'title': title,
+                'user_id': str(user_id),
+                'video_id': video_id
+            }
+            
+            # Get session cookie for authentication (if available)
+            # In local mode, we might need to pass auth token differently
+            cookies = {}
+            if 'session' in session:
+                # Try to get session cookie - this might not work in local mode
+                # Alternative: Use API key or token-based auth
+                pass
+            
+            print(f"[{video_id}] Uploading {filename} ({file_path.stat().st_size / 1024 / 1024:.2f} MB) to {upload_url}...")
+            response = requests.post(
+                upload_url,
+                files=files,
+                data=data,
+                cookies=cookies,
+                timeout=300  # 5 minute timeout for large files
+            )
+            
+            if response.status_code == 200:
+                print(f"[{video_id}] Upload successful!")
+                return True
+            else:
+                print(f"[{video_id}] Upload failed: {response.status_code} - {response.text[:200]}")
+                return False
+                
+    except Exception as e:
+        print(f"[{video_id}] Upload error: {str(e)}")
+        return False
 
 
 def run_ytdlp(video_id, url):
@@ -726,28 +778,44 @@ def run_ytdlp(video_id, url):
                     return
                 
                 try:
-                    # Check if video already exists (shouldn't happen, but just in case)
-                    existing = get_video_by_youtube_url(youtube_url)
-                    if existing:
-                        video_db_id = existing['id']
-                        print(f"[{video_id}] Video already in shared storage (ID: {video_db_id}), using existing entry")
-                    else:
-                        # Create new video entry
-                        print(f"[{video_id}] Creating new video entry in database...")
-                        video_db_id = create_video(filename, youtube_url, title, file_size)
-                        if video_db_id:
-                            print(f"[{video_id}] ✓ Video registered in shared storage (ID: {video_db_id})")
+                    # If in local downloader mode, upload to remote server instead of saving locally
+                    if LOCAL_DOWNLOADER_MODE and REMOTE_SERVER_URL:
+                        print(f"[{video_id}] Local downloader mode: Uploading to remote server...")
+                        upload_success = upload_video_to_remote(output_path, filename, youtube_url, title, user_id, video_id)
+                        if upload_success:
+                            print(f"[{video_id}] ✓ Video uploaded to remote server successfully")
+                            # Clean up local file after successful upload
+                            try:
+                                output_path.unlink()
+                                print(f"[{video_id}] Local file cleaned up")
+                            except Exception as e:
+                                print(f"[{video_id}] Warning: Could not delete local file: {e}")
                         else:
-                            raise Exception("create_video returned None")
-                    
-                    # Add to user's library
-                    if video_db_id:
-                        print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
-                        add_video_to_library(user_id, video_db_id, {
-                            "title": title,
-                            "sourceUrl": youtube_url
-                        })
-                        print(f"[{video_id}] ✓ Video added to user's library successfully")
+                            raise Exception("Failed to upload video to remote server")
+                    else:
+                        # Normal mode: Save locally and register in database
+                        # Check if video already exists (shouldn't happen, but just in case)
+                        existing = get_video_by_youtube_url(youtube_url)
+                        if existing:
+                            video_db_id = existing['id']
+                            print(f"[{video_id}] Video already in shared storage (ID: {video_db_id}), using existing entry")
+                        else:
+                            # Create new video entry
+                            print(f"[{video_id}] Creating new video entry in database...")
+                            video_db_id = create_video(filename, youtube_url, title, file_size)
+                            if video_db_id:
+                                print(f"[{video_id}] ✓ Video registered in shared storage (ID: {video_db_id})")
+                            else:
+                                raise Exception("create_video returned None")
+                        
+                        # Add to user's library
+                        if video_db_id:
+                            print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
+                            add_video_to_library(user_id, video_db_id, {
+                                "title": title,
+                                "sourceUrl": youtube_url
+                            })
+                            print(f"[{video_id}] ✓ Video added to user's library successfully")
                         
                         # Verify it was added
                         from database import get_user_library
@@ -865,6 +933,88 @@ def start_download():
     thread.start()
     
     return jsonify({"id": video_id})
+
+
+@app.route("/api/upload-video", methods=["POST"])
+def upload_video():
+    """Receive video upload from local downloader"""
+    # Check authentication - can use session or API key
+    user_id = None
+    
+    # Try to get user_id from session first
+    if 'user_id' in session:
+        user_id = session.get('user_id')
+    # Otherwise try from form data (for local downloader mode)
+    elif request.form.get('user_id'):
+        user_id = int(request.form.get('user_id'))
+    
+    if not user_id:
+        return jsonify({"error": "Authentication required"}), 401
+    
+    # Get video file
+    if 'video' not in request.files:
+        return jsonify({"error": "No video file provided"}), 400
+    
+    video_file = request.files['video']
+    if video_file.filename == '':
+        return jsonify({"error": "No video file selected"}), 400
+    
+    youtube_url = request.form.get('youtube_url')
+    title = request.form.get('title', video_file.filename)
+    video_id = request.form.get('video_id', '')
+    
+    if not youtube_url:
+        return jsonify({"error": "youtube_url required"}), 400
+    
+    try:
+        # Save uploaded file
+        filename = video_file.filename
+        filepath = VIDEOS_DIR / filename
+        video_file.save(str(filepath))
+        file_size = filepath.stat().st_size
+        
+        print(f"[upload] Received video upload: {filename} ({file_size / 1024 / 1024:.2f} MB)")
+        print(f"[upload]   - youtube_url: {youtube_url}")
+        print(f"[upload]   - title: {title}")
+        print(f"[upload]   - user_id: {user_id}")
+        
+        # Check if video already exists
+        existing = get_video_by_youtube_url(youtube_url)
+        if existing:
+            video_db_id = existing['id']
+            print(f"[upload] Video already exists (ID: {video_db_id}), using existing entry")
+        else:
+            # Create new video entry
+            video_db_id = create_video(filename, youtube_url, title, file_size)
+            if video_db_id:
+                print(f"[upload] ✓ Video registered (ID: {video_db_id})")
+            else:
+                raise Exception("create_video returned None")
+        
+        # Add to user's library
+        if video_db_id:
+            add_video_to_library(user_id, video_db_id, {
+                "title": title,
+                "sourceUrl": youtube_url
+            })
+            print(f"[upload] ✓ Video added to user's library")
+        
+        return jsonify({
+            "success": True,
+            "video_id": video_db_id,
+            "filename": filename,
+            "message": "Video uploaded successfully"
+        })
+        
+    except Exception as e:
+        print(f"[upload] ERROR: {str(e)}")
+        # Clean up file if it was saved
+        if filepath.exists():
+            try:
+                filepath.unlink()
+            except:
+                pass
+        return jsonify({"error": f"Upload failed: {str(e)}"}), 500
 
 
 @app.route("/api/download/<video_id>", methods=["GET"])
