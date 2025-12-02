@@ -87,10 +87,16 @@ def execute_sql(cursor, sql, params=None):
         if '?' in sql and params:
             # Simple replacement - assumes no ? in string literals
             sql = sql.replace('?', '%s')
-        cursor.execute(sql, params)
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
     else:
         # SQLite uses ? placeholders
-        cursor.execute(sql, params)
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
 
 
 def fetch_one(cursor):
@@ -246,11 +252,15 @@ def init_db():
         print(f"⚠ Migration note: {str(e)}")
         pass
     
-    # Create index for OAuth lookups
-    execute_sql(cursor, '''
-        CREATE INDEX IF NOT EXISTS idx_oauth ON users(oauth_provider, oauth_id)
-    ''')
-    
+        # Create index for OAuth lookups
+        try:
+            execute_sql(cursor, '''
+                CREATE INDEX IF NOT EXISTS idx_oauth ON users(oauth_provider, oauth_id)
+            ''')
+            print("✓ Created/verified OAuth index")
+        except Exception as e:
+            print(f"⚠ Note on OAuth index: {str(e)}")
+        
         # Shows table (user's saved shows)
         try:
             execute_sql(cursor, f'''
@@ -316,11 +326,11 @@ def init_db():
         print(f"✗ CRITICAL: Database initialization failed: {str(e)}")
         import traceback
         traceback.print_exc()
-        if conn:
+        if 'conn' in locals():
             conn.rollback()
         raise
     finally:
-        if conn:
+        if 'conn' in locals():
             conn.close()
 
 
