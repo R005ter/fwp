@@ -3093,14 +3093,18 @@
       };
 
       const handleDownloadComplete = async (dl) => {
-        // Check if this is a server-side download (has filename but no localUrl flag)
-        const isServerSideDownload = dl.filename && !dl.localUrl && !dl.videoId;
+        // Check if this is a server-side download
+        // Server-side downloads have filename and status='complete' but no localUrl or videoId from IndexedDB
+        const isServerSideDownload = dl.filename && dl.status === 'complete' && !dl.localUrl && (!dl.videoId || dl.serverSide);
         
         if (isServerSideDownload) {
-          // Server-side download: Refresh library from server
-          console.log('[Download Complete] Server-side download detected, refreshing library...');
-          await loadAvailableVideos();
-          showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+          // Server-side download: Refresh library from server to get the new video
+          console.log('[Download Complete] Server-side download detected, refreshing library from server...');
+          // Small delay to ensure server has finished processing
+          setTimeout(async () => {
+            await loadAvailableVideos();
+            showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+          }, 500);
           return;
         }
         
