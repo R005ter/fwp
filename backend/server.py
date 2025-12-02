@@ -275,22 +275,10 @@ def run_ytdlp(video_id, url):
             "--add-header", "Upgrade-Insecure-Requests:1",
         ]
         
-        # Add proxy if configured
-        proxy_to_use = YOUTUBE_PROXY
-        if YOUTUBE_PROXY:
-            info_cmd.extend(["--proxy", proxy_to_use])
-            proxy_display = proxy_to_use.split('@')[-1] if '@' in proxy_to_use else proxy_to_use
-            print(f"[{video_id}] Using proxy: {proxy_display}")
-            # Bright Data proxies require disabling SSL verification due to SSL interception
-            if BRIGHT_DATA_PROXY:
-                info_cmd.extend(["--no-check-certificate"])
-                print(f"[{video_id}] SSL verification disabled for Bright Data proxy")
-                # Log username format for debugging
-                if '@' in proxy_to_use:
-                    username_part = proxy_to_use.split('@')[0]
-                    if '://' in username_part:
-                        username = username_part.split('://')[1].split(':')[0]
-                        print(f"[{video_id}] Proxy username: {username}")
+        # Strategy: Try direct connection first, then proxy as fallback
+        # This works locally (direct works) and on Render (direct fails, proxy is fallback)
+        proxy_to_use = None
+        use_proxy = False
         
         # Add cookies if available
         if has_cookies:
@@ -304,11 +292,46 @@ def run_ytdlp(video_id, url):
             "--no-download",
             url
         ])
-        print(f"[{video_id}] Fetching video info...")
+        
+        # Try direct connection first (works locally, may fail on Render)
+        print(f"[{video_id}] Fetching video info (direct connection)...")
         info_result = subprocess.run(info_cmd, capture_output=True, text=True)
         
+        # If direct connection fails and proxy is configured, try with proxy
+        if info_result.returncode != 0 and YOUTUBE_PROXY:
+            error_output = info_result.stderr.lower()
+            # Check if it's a bot detection or connection error (not other errors)
+            if any(keyword in error_output for keyword in ['bot', 'sign in', 'unable to download', '403', '429', 'blocked']):
+                print(f"[{video_id}] Direct connection failed, trying with proxy...")
+                proxy_to_use = YOUTUBE_PROXY
+                use_proxy = True
+                
+                # Build new command with proxy
+                proxy_info_cmd = info_cmd.copy()
+                # Insert proxy before --dump-json (which is at index -3: --dump-json, --no-download, url)
+                proxy_idx = len(proxy_info_cmd) - 3
+                proxy_info_cmd.insert(proxy_idx, "--proxy")
+                proxy_info_cmd.insert(proxy_idx + 1, proxy_to_use)
+                
+                proxy_display = proxy_to_use.split('@')[-1] if '@' in proxy_to_use else proxy_to_use
+                print(f"[{video_id}] Using proxy: {proxy_display}")
+                
+                # Bright Data proxies require disabling SSL verification due to SSL interception
+                if BRIGHT_DATA_PROXY:
+                    # Insert --no-check-certificate right after --proxy
+                    proxy_info_cmd.insert(proxy_idx + 2, "--no-check-certificate")
+                    print(f"[{video_id}] SSL verification disabled for Bright Data proxy")
+                    # Log username format for debugging
+                    if '@' in proxy_to_use:
+                        username_part = proxy_to_use.split('@')[0]
+                        if '://' in username_part:
+                            username = username_part.split('://')[1].split(':')[0]
+                            print(f"[{video_id}] Proxy username: {username}")
+                
+                info_result = subprocess.run(proxy_info_cmd, capture_output=True, text=True)
+        
         # If Bright Data proxy fails with 403, try alternative format
-        if info_result.returncode != 0 and BRIGHT_DATA_PROXY and YOUTUBE_PROXY_ORIGINAL:
+        if info_result.returncode != 0 and BRIGHT_DATA_PROXY and YOUTUBE_PROXY_ORIGINAL and use_proxy:
             error_output = info_result.stderr.lower()
             if '403' in error_output or 'forbidden' in error_output or 'tunnel connection failed' in error_output:
                 print(f"[{video_id}] Proxy connection failed with 403, trying alternative format...")
@@ -370,8 +393,8 @@ def run_ytdlp(video_id, url):
             "--add-header", "Upgrade-Insecure-Requests:1",
         ]
         
-        # Add proxy if configured (use the working format from info fetch if retry succeeded)
-        if YOUTUBE_PROXY:
+        # Add proxy if we used it successfully for info fetch
+        if proxy_to_use and use_proxy:
             cmd.extend(["--proxy", proxy_to_use])
             # Bright Data proxies require disabling SSL verification due to SSL interception
             if BRIGHT_DATA_PROXY:
