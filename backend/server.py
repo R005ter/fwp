@@ -23,6 +23,10 @@ from database import (
     add_video_to_library, remove_video_from_library,
     get_video_reference_count, cleanup_orphaned_videos
 )
+from r2_storage import (
+    upload_to_r2, delete_from_r2, get_r2_url, file_exists_in_r2,
+    get_file_size_from_r2, R2_ENABLED
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -780,6 +784,17 @@ def run_ytdlp(video_id, url):
                 print(f"[{video_id}] Download complete: {filename}")
                 print(f"[{video_id}] File size: {file_size / 1024 / 1024:.2f} MB")
                 
+                # Upload to R2 if enabled
+                if R2_ENABLED:
+                    print(f"[{video_id}] Uploading to R2...")
+                    if upload_to_r2(output_path, filename):
+                        print(f"[{video_id}] ✓ Video uploaded to R2")
+                        # Optionally delete local file to save disk space (uncomment if desired)
+                        # output_path.unlink()
+                        # print(f"[{video_id}] Local file deleted (stored in R2 only)")
+                    else:
+                        print(f"[{video_id}] ⚠ Failed to upload to R2, keeping local file")
+                
                 # Register video in shared storage and add to user's library
                 youtube_url = downloads[video_id].get("youtube_url")
                 title = downloads[video_id].get("title", filename)
@@ -924,9 +939,18 @@ def start_download():
     # Check if video already exists in shared storage
     existing_video = get_video_by_youtube_url(url)
     if existing_video:
-        # Video already downloaded - check if file still exists
-        filepath = VIDEOS_DIR / existing_video['filename']
-        if filepath.exists():
+        # Video already downloaded - check if file exists in R2 or locally
+        filename = existing_video['filename']
+        file_exists = False
+        
+        if R2_ENABLED and file_exists_in_r2(filename):
+            file_exists = True
+        else:
+            filepath = VIDEOS_DIR / filename
+            if filepath.exists():
+                file_exists = True
+        
+        if file_exists:
             # Video exists, return immediately
             user_id = get_current_user_id()
             # Add to user's library if not already there
@@ -1017,6 +1041,17 @@ def upload_video():
         print(f"[upload]   - youtube_url: {youtube_url or '(direct upload)'}")
         print(f"[upload]   - title: {title}")
         print(f"[upload]   - user_id: {user_id}")
+        
+        # Upload to R2 if enabled
+        if R2_ENABLED:
+            print(f"[upload] Uploading to R2...")
+            if upload_to_r2(filepath, filename):
+                print(f"[upload] ✓ Video uploaded to R2")
+                # Optionally delete local file to save disk space (uncomment if desired)
+                # filepath.unlink()
+                # print(f"[upload] Local file deleted (stored in R2 only)")
+            else:
+                print(f"[upload] ⚠ Failed to upload to R2, keeping local file")
         
         # Check if video already exists (by youtube_url if provided, or by filename)
         existing = None
@@ -1115,13 +1150,25 @@ def list_videos():
     videos = []
     # Only show videos that are in the user's library
     for filename, metadata in user_library.items():
-        filepath = VIDEOS_DIR / filename
-        if filepath.exists():
+        # Check if file exists in R2 or locally
+        file_exists = False
+        file_size = None
+        
+        if R2_ENABLED and file_exists_in_r2(filename):
+            file_exists = True
+            file_size = get_file_size_from_r2(filename) or 0
+        else:
+            filepath = VIDEOS_DIR / filename
+            if filepath.exists():
+                file_exists = True
+                file_size = filepath.stat().st_size
+        
+        if file_exists:
             videos.append({
-                "id": filepath.stem,
+                "id": filename.split('.')[0],  # Use filename without extension as ID
                 "filename": filename,
                 "title": metadata.get("title", filename),
-                "size": filepath.stat().st_size
+                "size": file_size
             })
     
     return jsonify(videos)
@@ -1152,6 +1199,12 @@ def delete_video(filename):
             filepath = VIDEOS_DIR / filename
             files_deleted = []
             
+            # Delete from R2 if enabled
+            if R2_ENABLED:
+                if delete_from_r2(filename):
+                    files_deleted.append(f"{filename} (R2)")
+            
+            # Delete local file if it exists
             if filepath.exists():
                 filepath.unlink()
                 files_deleted.append(filename)
@@ -1191,8 +1244,20 @@ def delete_video(filename):
 
 @app.route("/videos/<filename>")
 def serve_video(filename):
-    """Serve a video file"""
-    return send_from_directory(VIDEOS_DIR, filename)
+    """Serve a video file from R2 or local storage"""
+    # Check if file exists in R2 first
+    if R2_ENABLED and file_exists_in_r2(filename):
+        # Generate presigned URL (valid for 1 hour)
+        r2_url = get_r2_url(filename, expires_in=3600)
+        if r2_url:
+            return redirect(r2_url)
+    
+    # Fallback to local file if R2 not enabled or file not in R2
+    filepath = VIDEOS_DIR / filename
+    if filepath.exists():
+        return send_from_directory(str(VIDEOS_DIR), filename)
+    
+    return jsonify({"error": "Video not found"}), 404
 
 
 @app.route("/")
@@ -1602,9 +1667,15 @@ def cleanup_videos():
     
     deleted_files = cleanup_orphaned_videos()
     
-    # Also delete the actual files
+    # Also delete the actual files from R2 and local storage
     files_deleted = []
     for filename in deleted_files:
+        # Delete from R2 if enabled
+        if R2_ENABLED:
+            if delete_from_r2(filename):
+                files_deleted.append(f"{filename} (R2)")
+        
+        # Delete local file if it exists
         filepath = VIDEOS_DIR / filename
         if filepath.exists():
             filepath.unlink()

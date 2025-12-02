@@ -2,15 +2,23 @@ services:
   - type: web
     name: fireworks-planner
     runtime: python
-    buildCommand: "cd backend && pip install -r requirements.txt && pip install gunicorn"
+    buildCommand: "cd backend && pip install -r requirements.txt && pip install gunicorn && yt-dlp --update"
     startCommand: "cd backend && gunicorn server:app --bind 0.0.0.0:$PORT"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: RENDER
         value: true
-    disk:
-      name: videos-storage
-      mountPath: /opt/render/project/src/backend/videos
-      sizeGB: 1
+      # R2 Configuration - Add these in Render dashboard Environment tab:
+      # - key: R2_ACCOUNT_ID
+      #   value: ee931125693573fbbcdd6a3ed03a084e
+      # - key: R2_ACCESS_KEY_ID
+      #   value: 2ea07b8a99215abd5e6909fda7a9dce6
+      # - key: R2_SECRET_ACCESS_KEY
+      #   value: 220b18f80db5728df3b5360d72092cbd2eea57be26004dff8c989c1fa9744637
+      # - key: R2_BUCKET_NAME
+      #   value: fwp-videos
+      # - key: R2_ENDPOINT_URL
+      #   value: https://ee931125693573fbbcdd6a3ed03a084e.r2.cloudflarestorage.com
+    # Disk section removed - using Cloudflare R2 for storage instead
 
