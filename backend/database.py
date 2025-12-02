@@ -159,13 +159,14 @@ def fetch_all(cursor):
 def get_table_info(cursor, table_name):
     """Get table column information"""
     if USE_POSTGRES:
-        cursor.execute("""
+        execute_sql(cursor, """
             SELECT column_name, data_type, is_nullable
             FROM information_schema.columns
             WHERE table_name = %s
         """, (table_name,))
-        return cursor.fetchall()
+        return fetch_all(cursor)
     else:
+        # SQLite PRAGMA doesn't use placeholders
         cursor.execute("PRAGMA table_info({})".format(table_name))
         return cursor.fetchall()
 
@@ -242,30 +243,30 @@ def init_db():
         try:
             if USE_POSTGRES:
                 # PostgreSQL: Check if column exists using information_schema
-                cursor.execute("""
+                execute_sql(cursor, """
                     SELECT column_name 
                     FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name = 'oauth_provider'
-                """)
-                if not cursor.fetchone():
+                    WHERE table_name = %s AND column_name = %s
+                """, ('users', 'oauth_provider'))
+                if not fetch_one(cursor):
                     execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
                     print("✓ Added oauth_provider column to users table")
                 
-                cursor.execute("""
+                execute_sql(cursor, """
                     SELECT column_name 
                     FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name = 'oauth_id'
-                """)
-                if not cursor.fetchone():
+                    WHERE table_name = %s AND column_name = %s
+                """, ('users', 'oauth_id'))
+                if not fetch_one(cursor):
                     execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
                     print("✓ Added oauth_id column to users table")
             
-                cursor.execute("""
+                execute_sql(cursor, """
                     SELECT column_name 
                     FROM information_schema.columns 
-                    WHERE table_name = 'users' AND column_name = 'youtube_cookies'
-                """)
-                if not cursor.fetchone():
+                    WHERE table_name = %s AND column_name = %s
+                """, ('users', 'youtube_cookies'))
+                if not fetch_one(cursor):
                     execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
                     print("✓ Added youtube_cookies column to users table")
             else:

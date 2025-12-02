@@ -1253,10 +1253,10 @@ def delete_video(filename):
                     files_deleted.append(related_file.name)
             
             # Delete from videos table (CASCADE will clean up library references)
-            from database import get_db
+            from database import get_db, execute_sql
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM videos WHERE id = ?', (video['id'],))
+            execute_sql(cursor, 'DELETE FROM videos WHERE id = ?', (video['id'],))
             conn.commit()
             conn.close()
             
