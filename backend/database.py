@@ -32,17 +32,9 @@ def get_db():
     if USE_POSTGRES:
         # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
         # Use RealDictCursor to get dict-like rows (similar to SQLite Row)
-        # Supabase and most cloud PostgreSQL require SSL
-        try:
-            # Try connecting with SSL (required for Supabase)
-            conn = psycopg2.connect(
-                DATABASE_URL,
-                cursor_factory=RealDictCursor,
-                sslmode='require' if 'supabase' in DATABASE_URL.lower() else 'prefer'
-            )
-        except psycopg2.OperationalError:
-            # Fallback: try without explicit SSL mode (some providers handle it automatically)
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        # Supabase connection strings work as-is (SSL is handled automatically)
+        # If you need to add SSL parameters, append ?sslmode=require to the URL
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         return conn
     else:
         conn = sqlite3.connect(DB_PATH)
