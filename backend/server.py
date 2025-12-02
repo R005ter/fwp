@@ -865,24 +865,22 @@ def run_ytdlp(video_id, url):
                             # Fall through to local registration
                     
                     # Normal mode or fallback: Save locally and register in database
-                    if True:  # Always execute this block
-                        # Normal mode: Save locally and register in database
-                        # Check if video already exists (shouldn't happen, but just in case)
-                        existing = get_video_by_youtube_url(youtube_url)
-                        if existing:
-                            video_db_id = existing['id']
-                            print(f"[{video_id}] Video already in shared storage (ID: {video_db_id}), using existing entry")
-                        else:
-                            # Create new video entry
-                            print(f"[{video_id}] Creating new video entry in database...")
-                            video_db_id = create_video(filename, youtube_url, title, file_size)
-                            if video_db_id:
-                                print(f"[{video_id}] ✓ Video registered in shared storage (ID: {video_db_id})")
-                            else:
-                                raise Exception("create_video returned None")
-                        
-                        # Add to user's library
+                    # Check if video already exists (shouldn't happen, but just in case)
+                    existing = get_video_by_youtube_url(youtube_url)
+                    if existing:
+                        video_db_id = existing['id']
+                        print(f"[{video_id}] Video already in shared storage (ID: {video_db_id}), using existing entry")
+                    else:
+                        # Create new video entry
+                        print(f"[{video_id}] Creating new video entry in database...")
+                        video_db_id = create_video(filename, youtube_url, title, file_size)
                         if video_db_id:
+                            print(f"[{video_id}] ✓ Video registered in shared storage (ID: {video_db_id})")
+                        else:
+                            raise Exception("create_video returned None")
+                    
+                    # Add to user's library
+                    if video_db_id:
                             print(f"[{video_id}] Adding video to user's library (user_id: {user_id}, video_id: {video_db_id})...")
                             add_video_to_library(user_id, video_db_id, {
                                 "title": title,
