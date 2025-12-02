@@ -1,22 +1,87 @@
 """
 Database models and setup for Fireworks Planner
-Uses SQLite for simplicity and portability
+Supports both SQLite (local) and PostgreSQL (shared/production)
+Uses DATABASE_URL environment variable to determine which to use
 """
 
-import sqlite3
+import os
 import json
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-DB_PATH = Path(__file__).parent / "fireworks.db"
+# Check if DATABASE_URL is set (PostgreSQL) or use SQLite
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    # PostgreSQL mode
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    USE_POSTGRES = True
+    print("✓ Using PostgreSQL database (shared)")
+else:
+    # SQLite mode (fallback for local development)
+    import sqlite3
+    USE_POSTGRES = False
+    DB_PATH = Path(__file__).parent / "fireworks.db"
+    print(f"✓ Using SQLite database (local): {DB_PATH}")
 
 
 def get_db():
     """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if USE_POSTGRES:
+        # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def execute_sql(cursor, sql, params=None):
+    """Execute SQL with proper placeholder syntax for SQLite/PostgreSQL"""
+    if USE_POSTGRES:
+        # PostgreSQL uses %s placeholders
+        # Convert ? to %s if needed (but be careful not to replace in strings)
+        if '?' in sql and params:
+            # Simple replacement - assumes no ? in string literals
+            sql = sql.replace('?', '%s')
+        cursor.execute(sql, params)
+    else:
+        # SQLite uses ? placeholders
+        cursor.execute(sql, params)
+
+
+def fetch_one(cursor):
+    """Fetch one row, returning dict-like object"""
+    if USE_POSTGRES:
+        return cursor.fetchone()
+    else:
+        row = cursor.fetchone()
+        return row
+
+
+def fetch_all(cursor):
+    """Fetch all rows, returning list of dict-like objects"""
+    if USE_POSTGRES:
+        return cursor.fetchall()
+    else:
+        return cursor.fetchall()
+
+
+def get_table_info(cursor, table_name):
+    """Get table column information"""
+    if USE_POSTGRES:
+        cursor.execute("""
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = %s
+        """, (table_name,))
+        return cursor.fetchall()
+    else:
+        cursor.execute("PRAGMA table_info({})".format(table_name))
+        return cursor.fetchall()
 
 
 def init_db():
@@ -24,163 +89,90 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
     
+    # Determine primary key syntax
+    if USE_POSTGRES:
+        pk_syntax = "SERIAL PRIMARY KEY"
+        text_type = "TEXT"
+        int_type = "INTEGER"
+        timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
+    else:
+        pk_syntax = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        text_type = "TEXT"
+        int_type = "INTEGER"
+        timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
+    
     # Users table - supports both local and OAuth users
-    cursor.execute('''
+    execute_sql(cursor, f'''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT,
-            password_hash TEXT,
-            oauth_provider TEXT,
-            oauth_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            id {pk_syntax},
+            username {text_type} UNIQUE NOT NULL,
+            email {text_type},
+            password_hash {text_type},
+            oauth_provider {text_type},
+            oauth_id {text_type},
+            youtube_cookies {text_type},
+            created_at TIMESTAMP {timestamp_default},
             UNIQUE(oauth_provider, oauth_id)
         )
     ''')
     
     # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
-    try:
-        cursor.execute('ALTER TABLE users ADD COLUMN oauth_provider TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN oauth_id TEXT')
-    except sqlite3.OperationalError:
-        pass  # Columns already exist
-    
-    # Add youtube_cookies column if it doesn't exist
-    try:
-        cursor.execute('ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
-        print("✓ Added youtube_cookies column to users table")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    
-    # Fix password_hash NOT NULL constraint for OAuth users
-    # SQLite doesn't support ALTER COLUMN, so we need to recreate the table
-    cursor.execute("PRAGMA table_info(users)")
-    columns = {row[1]: row for row in cursor.fetchall()}
-    
-    if 'password_hash' in columns and columns['password_hash'][3] == 1:  # NOT NULL = True
-        print("⚠️  Migrating users table to allow NULL password_hash for OAuth users...")
-        # Create new table with correct schema (password_hash nullable)
-        cursor.execute('''
-            CREATE TABLE users_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT,
-                password_hash TEXT,
-                oauth_provider TEXT,
-                oauth_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(oauth_provider, oauth_id)
-            )
-        ''')
+    if not USE_POSTGRES:
+        # SQLite-specific migrations
+        try:
+            execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
+            execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
+        except (sqlite3.OperationalError, psycopg2.errors.DuplicateColumn):
+            pass  # Columns already exist
         
-        # Copy data from old table
-        cursor.execute('''
-            INSERT INTO users_new (id, username, email, password_hash, oauth_provider, oauth_id, created_at)
-            SELECT id, username, email, password_hash, oauth_provider, oauth_id, created_at
-            FROM users
-        ''')
-        
-        # Drop old table and rename new one
-        cursor.execute('DROP TABLE users')
-        cursor.execute('ALTER TABLE users_new RENAME TO users')
-        
-        print("✅ Migration complete")
+        try:
+            execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
+            print("✓ Added youtube_cookies column to users table")
+        except (sqlite3.OperationalError, psycopg2.errors.DuplicateColumn):
+            pass  # Column already exists
     
     # Create index for OAuth lookups
-    cursor.execute('''
+    execute_sql(cursor, '''
         CREATE INDEX IF NOT EXISTS idx_oauth ON users(oauth_provider, oauth_id)
     ''')
     
     # Shows table (user's saved shows)
-    cursor.execute('''
+    execute_sql(cursor, f'''
         CREATE TABLE IF NOT EXISTS shows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            data TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            id {pk_syntax},
+            user_id {int_type} NOT NULL,
+            name {text_type} NOT NULL,
+            data {text_type} NOT NULL,
+            timestamp TIMESTAMP {timestamp_default},
             FOREIGN KEY (user_id) REFERENCES users (id),
             UNIQUE(user_id, name)
         )
     ''')
     
     # Shared videos table (stores video files that can be shared across users)
-    cursor.execute('''
+    execute_sql(cursor, f'''
         CREATE TABLE IF NOT EXISTS videos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT UNIQUE NOT NULL,
-            youtube_url TEXT,
-            title TEXT,
-            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            file_size INTEGER
+            id {pk_syntax},
+            filename {text_type} UNIQUE NOT NULL,
+            youtube_url {text_type},
+            title {text_type},
+            downloaded_at TIMESTAMP {timestamp_default},
+            file_size {int_type}
         )
     ''')
     
     # Library metadata table (user's video library settings - references shared videos)
-    cursor.execute('''
+    execute_sql(cursor, f'''
         CREATE TABLE IF NOT EXISTS library (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            video_id INTEGER NOT NULL,
-            metadata TEXT NOT NULL,
+            id {pk_syntax},
+            user_id {int_type} NOT NULL,
+            video_id {int_type} NOT NULL,
+            metadata {text_type} NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (id),
             FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
             UNIQUE(user_id, video_id)
         )
     ''')
-    
-    # Migrate existing library table if needed (change from filename to video_id)
-    try:
-        cursor.execute("PRAGMA table_info(library)")
-        columns = {row[1]: row for row in cursor.fetchall()}
-        
-        if 'filename' in columns and 'video_id' not in columns:
-            print("⚠️  Migrating library table to use shared video references...")
-            # Create new library table
-            cursor.execute('''
-                CREATE TABLE library_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    video_id INTEGER NOT NULL,
-                    metadata TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users (id),
-                    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
-                    UNIQUE(user_id, video_id)
-                )
-            ''')
-            
-            # Migrate existing data: create video entries and link them
-            cursor.execute('SELECT DISTINCT user_id, filename, metadata FROM library')
-            old_library = cursor.fetchall()
-            
-            for row in old_library:
-                user_id, filename, metadata = row
-                # Check if video exists in videos table
-                cursor.execute('SELECT id FROM videos WHERE filename = ?', (filename,))
-                video = cursor.fetchone()
-                
-                if not video:
-                    # Create video entry
-                    cursor.execute('''
-                        INSERT INTO videos (filename, youtube_url, title)
-                        VALUES (?, ?, ?)
-                    ''', (filename, None, filename))
-                    video_id = cursor.lastrowid
-                else:
-                    video_id = video['id']
-                
-                # Add to new library table
-                cursor.execute('''
-                    INSERT INTO library_new (user_id, video_id, metadata)
-                    VALUES (?, ?, ?)
-                ''', (user_id, video_id, metadata))
-            
-            # Drop old table and rename
-            cursor.execute('DROP TABLE library')
-            cursor.execute('ALTER TABLE library_new RENAME TO library')
-            print("✅ Library migration complete")
-    except sqlite3.OperationalError as e:
-        pass  # Migration already done or error
     
     conn.commit()
     conn.close()
@@ -203,33 +195,36 @@ def create_user(username, email, password=None, oauth_provider=None, oauth_id=No
         base_username = username
         counter = 1
         while True:
-            cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
-            if not cursor.fetchone():
+            execute_sql(cursor, 'SELECT id FROM users WHERE username = ?', (username,))
+            if not fetch_one(cursor):
                 break
             username = f"{base_username}{counter}"
             counter += 1
         
         # Check if OAuth ID already exists
         if oauth_provider and oauth_id:
-            cursor.execute(
+            execute_sql(cursor,
                 'SELECT id FROM users WHERE oauth_provider = ? AND oauth_id = ?',
                 (oauth_provider, oauth_id)
             )
-            if cursor.fetchone():
+            if fetch_one(cursor):
                 conn.close()
                 return None  # OAuth ID already exists
         
-        cursor.execute(
-            'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (?, ?, ?, ?, ?)',
-            (username, email, password_hash, oauth_provider, oauth_id)
-        )
-        user_id = cursor.lastrowid
+        if USE_POSTGRES:
+            execute_sql(cursor,
+                'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                (username, email, password_hash, oauth_provider, oauth_id)
+            )
+            user_id = cursor.fetchone()[0]
+        else:
+            execute_sql(cursor,
+                'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (?, ?, ?, ?, ?)',
+                (username, email, password_hash, oauth_provider, oauth_id)
+            )
+            user_id = cursor.lastrowid
         conn.commit()
         return {"id": user_id, "username": username, "email": email, "oauth_provider": oauth_provider}
-    except sqlite3.IntegrityError as e:
-        print(f"Database integrity error creating user: {str(e)}")
-        print(f"  Username: {username}, Email: {email}, OAuth: {oauth_provider}/{oauth_id}")
-        return None  # Username or OAuth ID already exists
     except Exception as e:
         print(f"Error creating user: {str(e)}")
         import traceback
@@ -244,8 +239,8 @@ def verify_user(username, password):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-    user = cursor.fetchone()
+    execute_sql(cursor, 'SELECT * FROM users WHERE username = ?', (username,))
+    user = fetch_one(cursor)
     conn.close()
     
     if user and check_password_hash(user['password_hash'], password):
@@ -262,8 +257,8 @@ def get_user_by_id(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-    user = cursor.fetchone()
+    execute_sql(cursor, 'SELECT * FROM users WHERE id = ?', (user_id,))
+    user = fetch_one(cursor)
     conn.close()
     
     if user:
@@ -286,11 +281,11 @@ def get_user_by_oauth(provider, oauth_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute(
+    execute_sql(cursor,
         'SELECT * FROM users WHERE oauth_provider = ? AND oauth_id = ?',
         (provider, oauth_id)
     )
-    user = cursor.fetchone()
+    user = fetch_one(cursor)
     conn.close()
     
     if user:
@@ -314,10 +309,17 @@ def save_show(user_id, show_name, show_data):
     cursor = conn.cursor()
     
     data_json = json.dumps(show_data)
-    cursor.execute('''
-        INSERT OR REPLACE INTO shows (user_id, name, data, timestamp)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (user_id, show_name, data_json))
+    if USE_POSTGRES:
+        execute_sql(cursor, '''
+            INSERT INTO shows (user_id, name, data, timestamp)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, name) DO UPDATE SET data = %s, timestamp = CURRENT_TIMESTAMP
+        ''', (user_id, show_name, data_json, data_json))
+    else:
+        execute_sql(cursor, '''
+            INSERT OR REPLACE INTO shows (user_id, name, data, timestamp)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (user_id, show_name, data_json))
     
     conn.commit()
     conn.close()
@@ -328,11 +330,11 @@ def get_user_shows(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute(
+    execute_sql(cursor,
         'SELECT name, data, timestamp FROM shows WHERE user_id = ? ORDER BY timestamp DESC',
         (user_id,)
     )
-    rows = cursor.fetchall()
+    rows = fetch_all(cursor)
     conn.close()
     
     shows = []
@@ -350,7 +352,7 @@ def delete_show(user_id, show_name):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute(
+    execute_sql(cursor,
         'DELETE FROM shows WHERE user_id = ? AND name = ?',
         (user_id, show_name)
     )
@@ -365,8 +367,8 @@ def get_video_by_youtube_url(youtube_url):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT * FROM videos WHERE youtube_url = ?', (youtube_url,))
-    video = cursor.fetchone()
+    execute_sql(cursor, 'SELECT * FROM videos WHERE youtube_url = ?', (youtube_url,))
+    video = fetch_one(cursor)
     conn.close()
     
     if video:
@@ -390,8 +392,8 @@ def get_video_by_filename(filename):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT * FROM videos WHERE filename = ?', (filename,))
-    video = cursor.fetchone()
+    execute_sql(cursor, 'SELECT * FROM videos WHERE filename = ?', (filename,))
+    video = fetch_one(cursor)
     conn.close()
     
     if video:
@@ -416,21 +418,27 @@ def create_video(filename, youtube_url=None, title=None, file_size=None):
     cursor = conn.cursor()
     
     try:
-        cursor.execute('''
-            INSERT INTO videos (filename, youtube_url, title, file_size)
-            VALUES (?, ?, ?, ?)
-        ''', (filename, youtube_url, title, file_size))
-        video_id = cursor.lastrowid
+        if USE_POSTGRES:
+            execute_sql(cursor, '''
+                INSERT INTO videos (filename, youtube_url, title, file_size)
+                VALUES (%s, %s, %s, %s) RETURNING id
+            ''', (filename, youtube_url, title, file_size))
+            video_id = cursor.fetchone()[0]
+        else:
+            execute_sql(cursor, '''
+                INSERT INTO videos (filename, youtube_url, title, file_size)
+                VALUES (?, ?, ?, ?)
+            ''', (filename, youtube_url, title, file_size))
+            video_id = cursor.lastrowid
         conn.commit()
+        conn.close()
         return video_id
-    except sqlite3.IntegrityError:
+    except Exception as e:
         # Video already exists
-        cursor.execute('SELECT id FROM videos WHERE filename = ?', (filename,))
-        video = cursor.fetchone()
+        execute_sql(cursor, 'SELECT id FROM videos WHERE filename = ?', (filename,))
+        video = fetch_one(cursor)
         conn.close()
         return video['id'] if video else None
-    finally:
-        conn.close()
 
 
 def add_video_to_library(user_id, video_id, metadata):
@@ -439,10 +447,17 @@ def add_video_to_library(user_id, video_id, metadata):
     cursor = conn.cursor()
     
     metadata_json = json.dumps(metadata)
-    cursor.execute('''
-        INSERT OR REPLACE INTO library (user_id, video_id, metadata)
-        VALUES (?, ?, ?)
-    ''', (user_id, video_id, metadata_json))
+    if USE_POSTGRES:
+        execute_sql(cursor, '''
+            INSERT INTO library (user_id, video_id, metadata)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, video_id) DO UPDATE SET metadata = %s
+        ''', (user_id, video_id, metadata_json, metadata_json))
+    else:
+        execute_sql(cursor, '''
+            INSERT OR REPLACE INTO library (user_id, video_id, metadata)
+            VALUES (?, ?, ?)
+        ''', (user_id, video_id, metadata_json))
     
     conn.commit()
     conn.close()
@@ -478,13 +493,13 @@ def get_user_library(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('''
+    execute_sql(cursor, '''
         SELECT v.filename, l.metadata
         FROM library l
         JOIN videos v ON l.video_id = v.id
         WHERE l.user_id = ?
     ''', (user_id,))
-    rows = cursor.fetchall()
+    rows = fetch_all(cursor)
     conn.close()
     
     library = {}
@@ -498,8 +513,8 @@ def get_video_reference_count(video_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT COUNT(*) as count FROM library WHERE video_id = ?', (video_id,))
-    result = cursor.fetchone()
+    execute_sql(cursor, 'SELECT COUNT(*) as count FROM library WHERE video_id = ?', (video_id,))
+    result = fetch_one(cursor)
     conn.close()
     
     return result['count'] if result else 0
@@ -511,8 +526,8 @@ def remove_video_from_library(user_id, filename):
     cursor = conn.cursor()
     
     # Find video by filename
-    cursor.execute('SELECT id FROM videos WHERE filename = ?', (filename,))
-    video = cursor.fetchone()
+    execute_sql(cursor, 'SELECT id FROM videos WHERE filename = ?', (filename,))
+    video = fetch_one(cursor)
     
     if not video:
         conn.close()
@@ -521,7 +536,7 @@ def remove_video_from_library(user_id, filename):
     video_id = video['id']
     
     # Remove from user's library
-    cursor.execute(
+    execute_sql(cursor,
         'DELETE FROM library WHERE user_id = ? AND video_id = ?',
         (user_id, video_id)
     )
@@ -538,17 +553,17 @@ def cleanup_orphaned_videos():
     cursor = conn.cursor()
     
     # Find videos with zero references
-    cursor.execute('''
+    execute_sql(cursor, '''
         SELECT v.id, v.filename
         FROM videos v
         LEFT JOIN library l ON v.id = l.video_id
         WHERE l.id IS NULL
     ''')
-    orphaned = cursor.fetchall()
+    orphaned = fetch_all(cursor)
     
     deleted_files = []
     for video in orphaned:
-        cursor.execute('DELETE FROM videos WHERE id = ?', (video['id'],))
+        execute_sql(cursor, 'DELETE FROM videos WHERE id = ?', (video['id'],))
         deleted_files.append(video['filename'])
     
     conn.commit()
@@ -567,8 +582,8 @@ def get_user_youtube_cookies(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT youtube_cookies FROM users WHERE id = ?', (user_id,))
-    row = cursor.fetchone()
+    execute_sql(cursor, 'SELECT youtube_cookies FROM users WHERE id = ?', (user_id,))
+    row = fetch_one(cursor)
     conn.close()
     
     if row:
@@ -584,7 +599,7 @@ def set_user_youtube_cookies(user_id, cookies_data):
     conn = get_db()
     cursor = conn.cursor()
     
-    cursor.execute(
+    execute_sql(cursor,
         'UPDATE users SET youtube_cookies = ? WHERE id = ?',
         (cookies_data, user_id)
     )
@@ -592,4 +607,3 @@ def set_user_youtube_cookies(user_id, cookies_data):
     conn.close()
     
     return cursor.rowcount > 0
-

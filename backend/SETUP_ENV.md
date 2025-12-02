@@ -17,6 +17,11 @@ R2_ACCESS_KEY_ID=2ea07b8a99215abd5e6909fda7a9dce6
 R2_SECRET_ACCESS_KEY=220b18f80db5728df3b5360d72092cbd2eea57be26004dff8c989c1fa9744637
 R2_BUCKET_NAME=fwp-videos
 R2_ENDPOINT_URL=https://ee931125693573fbbcdd6a3ed03a084e.r2.cloudflarestorage.com
+
+# PostgreSQL Database (optional - for shared database between local and Render)
+# If not set, uses SQLite (local file) instead
+# Get from Render Dashboard → PostgreSQL → External Database URL
+# DATABASE_URL=postgresql://user:password@hostname:5432/dbname
 ```
 
 3. The `start-servers.ps1` script will automatically load these when you run `START.bat`
@@ -37,6 +42,9 @@ $env:R2_ACCESS_KEY_ID="2ea07b8a99215abd5e6909fda7a9dce6"
 $env:R2_SECRET_ACCESS_KEY="220b18f80db5728df3b5360d72092cbd2eea57be26004dff8c989c1fa9744637"
 $env:R2_BUCKET_NAME="fwp-videos"
 $env:R2_ENDPOINT_URL="https://ee931125693573fbbcdd6a3ed03a084e.r2.cloudflarestorage.com"
+
+# PostgreSQL Database (optional - for shared database)
+# $env:DATABASE_URL="postgresql://user:password@hostname:5432/dbname"
 ```
 
 Then start the server.
@@ -52,4 +60,13 @@ Then start the server.
 7. Copy the Client ID and Client Secret
 
 See `GOOGLE_OAUTH_SETUP.md` for detailed instructions.
+
+## Database Configuration
+
+**By default:** Uses SQLite (local file `backend/fireworks.db`)
+
+**For shared database:** Set `DATABASE_URL` to use PostgreSQL:
+- Local and Render will share the same database
+- Shows and library data will sync automatically
+- See `POSTGRESQL_SETUP.md` for detailed setup instructions
 

@@ -1,0 +1,169 @@
+# PostgreSQL Database Setup Guide
+
+This guide explains how to set up a shared PostgreSQL database so your local and Render instances use the same database, keeping shows and library data in sync.
+
+## Why PostgreSQL?
+
+**Problem:** SQLite databases are separate files - your local client and Render server each have their own database, so:
+- ❌ Shows saved locally don't appear on Render
+- ❌ Library changes don't sync
+- ❌ User data is isolated per instance
+
+**Solution:** Use PostgreSQL (shared database) that both instances connect to:
+- ✅ Shows sync across local and Render
+- ✅ Library changes sync automatically
+- ✅ Single source of truth for all data
+
+## Step 1: Create PostgreSQL Database on Render
+
+1. Go to [Render Dashboard](https://dashboard.render.com/)
+2. Click **"New +"** → **"PostgreSQL"**
+3. Configure:
+   - **Name:** `fireworks-planner-db` (or your preferred name)
+   - **Database:** `fireworks` (or leave default)
+   - **User:** Auto-generated
+   - **Region:** Same as your web service
+   - **Plan:** **Free** (1 GB storage, perfect for development)
+4. Click **"Create Database"**
+5. Wait ~2 minutes for database to be created
+
+## Step 2: Get Database Connection String
+
+1. In Render Dashboard, click on your PostgreSQL database
+2. Find **"Internal Database URL"** or **"Connection String"**
+3. It will look like:
+   ```
+   postgresql://user:password@hostname:5432/dbname
+   ```
+4. **Copy this URL** - you'll need it for both local and Render
+
+## Step 3: Configure Render Web Service
+
+1. Go to your web service in Render Dashboard
+2. Go to **"Environment"** tab
+3. Add environment variable:
+   - **Key:** `DATABASE_URL`
+   - **Value:** Your PostgreSQL connection string from Step 2
+4. Click **"Save Changes"**
+5. Render will automatically redeploy
+
+## Step 4: Configure Local Development
+
+### Option A: Add to .env file (Recommended)
+
+Add to `backend/.env`:
+```
+DATABASE_URL=postgresql://user:password@hostname:5432/dbname
+```
+
+**Important:** Use the **"External Database URL"** for local connections (not Internal). Render provides both:
+- **Internal URL:** Only works from within Render's network
+- **External URL:** Works from anywhere (your computer)
+
+### Option B: Set Environment Variable
+
+```powershell
+$env:DATABASE_URL="postgresql://user:password@hostname:5432/dbname"
+```
+
+## Step 5: Install PostgreSQL Driver Locally
+
+```powershell
+cd backend
+pip install psycopg2-binary
+```
+
+Or it will be installed automatically when you install requirements:
+```powershell
+pip install -r requirements.txt
+```
+
+## Step 6: Test the Connection
+
+1. Restart your local server
+2. Check logs - you should see:
+   ```
+   ✓ Using PostgreSQL database (shared)
+   ✅ Database initialized
+   ```
+3. If you see SQLite instead, check that `DATABASE_URL` is set correctly
+
+## How It Works
+
+**Without DATABASE_URL (SQLite):**
+- Local: `backend/fireworks.db` (local file)
+- Render: `backend/fireworks.db` (separate file)
+- ❌ Data doesn't sync
+
+**With DATABASE_URL (PostgreSQL):**
+- Local: Connects to PostgreSQL on Render
+- Render: Connects to same PostgreSQL database
+- ✅ Data syncs automatically!
+
+## Migration from SQLite
+
+**Existing data:** Your SQLite database won't automatically migrate. Options:
+
+### Option 1: Fresh Start (Recommended for Testing)
+- Start fresh with PostgreSQL
+- Old SQLite data stays in `backend/fireworks.db` as backup
+
+### Option 2: Manual Migration
+1. Export data from SQLite (if needed)
+2. Import to PostgreSQL (if needed)
+3. For most cases, starting fresh is easier
+
+## Troubleshooting
+
+### "psycopg2 not found"
+```powershell
+pip install psycopg2-binary
+```
+
+### "Connection refused" or "Can't connect"
+- Make sure you're using **External Database URL** for local connections
+- Check that database is running in Render dashboard
+- Verify firewall/network settings
+
+### "Still using SQLite"
+- Check that `DATABASE_URL` environment variable is set
+- Restart your server after setting environment variable
+- Check logs for database type message
+
+### "Table doesn't exist"
+- Database will auto-create tables on first run
+- Check that `init_db()` is being called
+- Look for "Database initialized" message in logs
+
+## Free Tier Limits
+
+**Render PostgreSQL Free Tier:**
+- ✅ 1 GB storage
+- ✅ Unlimited connections
+- ✅ 90 days free (then $7/month)
+- ⚠️ Database expires after 90 days if not upgraded
+
+**For Production:** Consider upgrading to paid tier ($7/month) for:
+- More storage
+- No expiration
+- Better performance
+- Backups
+
+## Benefits
+
+✅ **Unified Data:** Same shows/library on local and Render  
+✅ **Real-time Sync:** Changes appear immediately  
+✅ **No Conflicts:** Single source of truth  
+✅ **Scalable:** Can handle multiple instances  
+✅ **Free:** Works on Render's free tier  
+
+## Next Steps
+
+1. ✅ Create PostgreSQL database on Render
+2. ✅ Set `DATABASE_URL` on Render web service
+3. ✅ Set `DATABASE_URL` in local `.env`
+4. ✅ Install `psycopg2-binary` locally
+5. ✅ Restart servers and test!
+
+Your local and Render instances will now share the same database! 🎉
+
