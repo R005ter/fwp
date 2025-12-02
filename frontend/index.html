@@ -3093,7 +3093,18 @@
       };
 
       const handleDownloadComplete = async (dl) => {
-        // Add video to downloadedVideos map
+        // Check if this is a server-side download (has filename but no localUrl flag)
+        const isServerSideDownload = dl.filename && !dl.localUrl && !dl.videoId;
+        
+        if (isServerSideDownload) {
+          // Server-side download: Refresh library from server
+          console.log('[Download Complete] Server-side download detected, refreshing library...');
+          await loadAvailableVideos();
+          showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+          return;
+        }
+        
+        // Client-side download: Add video to downloadedVideos map (IndexedDB)
         const videoId = dl.videoId || extractVideoId(dl.url) || dl.filename?.replace('.mp4', '');
         if (videoId) {
           const localUrl = dl.localUrl || await getVideoFromDB(videoId);
