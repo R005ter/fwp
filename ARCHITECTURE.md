@@ -1,186 +1,202 @@
 # Fireworks Planner Architecture
 
-## Overview
+## Client Types & Capabilities
 
-The application supports three client types, all connecting to the same remote backend:
+### 1. **Local Client** (Executable)
+**Purpose**: Full-featured desktop client for downloading YouTube videos locally
 
-1. **Local Client** (Windows executable) - Full functionality including YouTube downloads
-2. **Web Client** (Render) - Full functionality except YouTube downloads
-3. **Mobile Client** - Uses videos from library, can edit shows and library
+**Capabilities**:
+- ✅ **YouTube Downloads**: Download videos from YouTube using local `yt-dlp`
+- ✅ **MP4 Uploads**: Upload MP4 files directly (if UI added)
+- ✅ **Show Editing**: Full show creation and editing
+- ✅ **Library Management**: View, edit, trim, crop videos in library
+- ✅ **Remote Sync**: Downloads are automatically uploaded to remote server
 
-## Client Capabilities
+**How it works**:
+- Frontend connects to **remote server** for API calls (auth, library, shows)
+- YouTube downloads routed to **local backend** (localhost:5000)
+- Local backend uploads completed downloads to remote server
+- Uses token-based authentication (token stored in localStorage)
 
-### Local Client (Son's PC)
-✅ **Full Access**
-- Add YouTube videos to library (via local yt-dlp)
-- Upload MP4 files directly
-- Edit shows (create, save, delete)
-- Edit library (trim, crop, metadata)
-- View all videos in library
-- All features available
+**Setup**:
+```bash
+python start_local_client.py
+# or
+FireworksPlanner.exe  # (after building executable)
+```
 
-**How it works:**
-- Frontend runs on `localhost:8080`
-- Connects to remote server for auth, library, shows
-- YouTube downloads use local backend (`localhost:5000`)
-- Downloaded videos automatically upload to remote server
-- Uses token-based auth (stored in localStorage)
+---
 
-### Web Client (Render)
-✅ **Most Features**
-- Upload MP4 files directly
-- Edit shows (create, save, delete)
-- Edit library (trim, crop, metadata)
-- View all videos in library
-- ❌ **Cannot** add YouTube videos (blocked)
+### 2. **Web Client** (Render)
+**Purpose**: Web-based interface accessible from any browser
 
-**How it works:**
-- Frontend and backend on same Render instance
-- Uses session cookies for auth
-- YouTube downloads disabled (`IS_WEB_CLIENT` check)
-- All other endpoints work normally
+**Capabilities**:
+- ❌ **YouTube Downloads**: Disabled (Render IPs blocked by YouTube)
+- ✅ **MP4 Uploads**: Can upload MP4 files directly via web interface
+- ✅ **Show Editing**: Full show creation and editing
+- ✅ **Library Management**: View, edit, trim, crop videos in library
 
-### Mobile Client
-✅ **Library & Editing**
-- View videos from library
-- Edit shows (create, save, delete)
-- Edit library items (trim, crop, metadata)
-- ❌ **Cannot** add YouTube videos
-- ❌ **Cannot** upload MP4 files (if not implemented)
+**How it works**:
+- All API calls go to remote server (Render)
+- YouTube download endpoint returns 403 error with helpful message
+- Uses session-based authentication (cookies)
 
-**How it works:**
-- Same frontend code (responsive design)
-- Connects to remote server
-- Uses same API endpoints as web client
-- Session-based auth
+**Access**: `https://fireworks-planner.onrender.com`
+
+---
+
+### 3. **Mobile Interface**
+**Purpose**: Mobile-optimized interface for show editing and library browsing
+
+**Capabilities**:
+- ❌ **YouTube Downloads**: Hidden on mobile devices
+- ❌ **MP4 Uploads**: Hidden on mobile devices
+- ✅ **Show Editing**: Full show creation and editing
+- ✅ **Library Management**: View, edit, trim, crop videos in library
+- ✅ **Library Browsing**: Use existing videos from library
+
+**How it works**:
+- Same as web client (connects to remote server)
+- Mobile detection hides YouTube download and upload UI
+- Optimized touch interface for editing
+
+**Access**: `https://fireworks-planner.onrender.com` (from mobile browser)
+
+---
+
+## Feature Matrix
+
+| Feature | Local Client | Web Client | Mobile |
+|---------|-------------|------------|--------|
+| YouTube Downloads | ✅ | ❌ | ❌ |
+| MP4 Uploads | ✅ | ✅ | ❌ |
+| Show Editing | ✅ | ✅ | ✅ |
+| Library Viewing | ✅ | ✅ | ✅ |
+| Library Editing (Trim/Crop) | ✅ | ✅ | ✅ |
+| Authentication | Token-based | Session-based | Session-based |
+
+---
+
+## Authentication Flow
+
+### Local Client
+1. User clicks "Login with Google" → Redirects to remote server
+2. OAuth completes on remote server
+3. Remote server generates auth token
+4. Redirects back to local client with token in URL: `http://localhost:8080#/dashboard?token=...`
+5. Local client stores token in localStorage
+6. All API requests include `X-Auth-Token` header
+
+### Web/Mobile Client
+1. User clicks "Login with Google" → Redirects to remote server
+2. OAuth completes on remote server
+3. Remote server sets session cookie
+4. Redirects back to web client: `https://fireworks-planner.onrender.com#/dashboard`
+5. Browser automatically sends session cookie with requests
+
+---
 
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/google` - OAuth login (all clients)
-- `GET /api/auth/me` - Get current user (supports tokens & sessions)
+- `GET /api/auth/me` - Get current user (supports both tokens and sessions)
+- `GET /api/auth/google` - Initiate Google OAuth
+- `GET /api/auth/google/callback` - OAuth callback
 - `POST /api/auth/logout` - Logout
 
-### Videos
-- `GET /api/videos` - List videos in library (all clients)
-- `POST /api/upload-video` - Upload MP4 file (web & local)
-- `POST /api/download` - Download YouTube video (**local client only**)
-- `GET /api/download/<id>` - Check download status (local client)
+### YouTube Downloads
+- `POST /api/download` - Start YouTube download (local client only)
+- `GET /api/download/<id>` - Get download status
 
-### Shows
-- `GET /api/shows` - Get all shows (all clients)
-- `POST /api/shows` - Save show (all clients)
-- `DELETE /api/shows/<name>` - Delete show (all clients)
+### Video Uploads
+- `POST /api/upload-video` - Upload MP4 file (web client)
 
 ### Library
-- `GET /api/library` - Get library metadata (all clients)
-- `POST /api/library` - Save library metadata (all clients)
-- `DELETE /api/library/<id>` - Delete library item (all clients)
+- `GET /api/library` - Get user's library
+- `POST /api/library` - Add video to library
+- `PUT /api/library/<id>` - Update library video metadata
+- `DELETE /api/library/<id>` - Remove video from library
 
-## Authentication Methods
+### Shows
+- `GET /api/shows` - Get all shows
+- `POST /api/shows/<name>` - Save show
+- `GET /api/shows/<name>` - Get show data
+- `DELETE /api/shows/<name>` - Delete show
 
-### Web Client (Render)
-- Uses Flask session cookies
-- Domain: `fireworks-planner.onrender.com`
-- CORS configured for same-origin
-
-### Local Client
-- Uses token-based auth
-- Token generated after OAuth login
-- Token stored in localStorage
-- Sent via `X-Auth-Token` header
-- Token expires after 24 hours
-
-### Mobile Client
-- Uses session cookies (same as web)
-- Or token-based if implemented
+---
 
 ## Data Flow
 
-### YouTube Download (Local Client Only)
+### YouTube Download (Local Client)
 ```
-1. User enters YouTube URL in local client
-2. Frontend routes to local backend (localhost:5000)
-3. Local backend downloads via yt-dlp
-4. Local backend uploads to remote server
-5. Remote server saves to database
-6. Video appears in library (all clients)
-```
-
-### MP4 Upload (Web & Local)
-```
-1. User selects MP4 file
-2. Frontend uploads to remote server
-3. Remote server saves file and metadata
-4. Video appears in library (all clients)
+User enters YouTube URL
+  ↓
+Frontend → Local Backend (localhost:5000) → /api/download
+  ↓
+Local Backend runs yt-dlp → Downloads video locally
+  ↓
+Local Backend → Remote Server → /api/upload-video
+  ↓
+Video saved on remote server
+  ↓
+Video added to user's library
 ```
 
 ### Show Editing (All Clients)
 ```
-1. User edits show in frontend
-2. Frontend saves to remote server
-3. Remote server updates database
-4. Changes visible to all clients
+User edits show
+  ↓
+Frontend → Remote Server → /api/shows/<name>
+  ↓
+Show data saved to database
 ```
 
 ### Library Editing (All Clients)
 ```
-1. User edits library item (trim, crop, etc.)
-2. Frontend saves metadata to remote server
-3. Remote server updates database
-4. Changes visible to all clients
+User edits video (trim/crop)
+  ↓
+Frontend → Remote Server → /api/library/<id>
+  ↓
+Metadata updated in database
 ```
 
-## Key Implementation Details
+---
 
-### YouTube Download Blocking
-```python
-# backend/server.py
-if IS_WEB_CLIENT and not LOCAL_DOWNLOADER_MODE:
-    return jsonify({
-        "error": "YouTube downloads are disabled on the web client..."
-    }), 403
-```
+## Environment Variables
 
-### Local Client Routing
-```javascript
-// start_local_client.py injects this
-window.fetch = function(url, options) {
-  // Route YouTube downloads to local backend
-  if (url.includes('/api/download')) {
-    url = url.replace(REMOTE_API_BASE, LOCAL_BACKEND_URL);
-  }
-  // Add auth token for remote API calls
-  if (authToken) {
-    options.headers['X-Auth-Token'] = authToken;
-  }
-  return originalFetch(url, options);
-};
-```
+### Remote Server (Render)
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID
+- `GOOGLE_CLIENT_SECRET` - Google OAuth secret
+- `SECRET_KEY` - Flask secret key
+- `YOUTUBE_COOKIES` - Base64 encoded YouTube cookies (optional)
 
-### Token Generation
-```python
-# backend/server.py - google_callback()
-if is_local_client:
-    auth_token = hashlib.sha256(...).hexdigest()[:32]
-    app.auth_tokens[auth_token] = {
-        'user_id': user['id'],
-        'expires': time.time() + 86400  # 24 hours
-    }
-    return redirect(f"{frontend_url}#/dashboard?token={auth_token}")
-```
+### Local Client
+- `REMOTE_API_URL` - Remote server URL (default: https://fireworks-planner.onrender.com)
+- `LOCAL_BACKEND_PORT` - Local backend port (default: 5000)
+- `FRONTEND_PORT` - Frontend port (default: 8080)
+- `YOUTUBE_PROXY` - Proxy for YouTube downloads (optional)
+- `YOUTUBE_COOKIES` - YouTube cookies file path (optional)
 
-## Summary
+---
 
-✅ **Local Client**: Full functionality (YouTube + everything else)
-✅ **Web Client**: Everything except YouTube downloads
-✅ **Mobile Client**: Library access + editing (no uploads/downloads)
+## Mobile Detection
 
-All clients share the same:
-- Database (remote server)
-- Library
-- Shows
-- User accounts
+Mobile devices are detected by:
+- Screen width < 768px AND height > width (portrait mode)
+- Touch device detection
 
-The only difference is **where** YouTube downloads happen (local only).
+When mobile is detected:
+- YouTube download UI is hidden
+- MP4 upload UI is hidden (if implemented)
+- All other features remain available
 
+---
+
+## Notes
+
+- **Local Client** requires Python and `yt-dlp` installed
+- **Web Client** requires no local installation
+- **Mobile** works on any mobile browser
+- All clients share the same database (on remote server)
+- Videos are stored on remote server for all clients
+- Local client downloads are temporary (uploaded then deleted locally)
