@@ -9,8 +9,8 @@ import sys
 import webbrowser
 import http.server
 import socketserver
+import re
 from pathlib import Path
-from urllib.parse import urlparse
 
 # Configuration
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -18,81 +18,57 @@ REMOTE_API_URL = os.environ.get('REMOTE_API_URL', 'https://fireworks-planner.onr
 PORT = int(os.environ.get('LOCAL_CLIENT_PORT', '8080'))
 
 class LocalClientHandler(http.server.SimpleHTTPRequestHandler):
-    """Custom handler that serves frontend and proxies API calls"""
+    """Custom handler that serves frontend with API configuration injection"""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(FRONTEND_DIR), **kwargs)
     
     def end_headers(self):
-        # Add CORS headers for API calls
+        # Add CORS headers
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         super().end_headers()
     
     def do_GET(self):
-        # Serve frontend files
-        if self.path.startswith('/api/'):
-            # Proxy API calls to remote server
-            self.proxy_api_request()
+        if self.path == '/' or self.path == '/index.html':
+            # Inject API configuration into index.html
+            self.serve_index_with_config()
         else:
-            # Serve static files
+            # Serve other static files normally
             super().do_GET()
     
-    def do_POST(self):
-        if self.path.startswith('/api/'):
-            self.proxy_api_request()
-        else:
+    def serve_index_with_config(self):
+        """Serve index.html with API_BASE configured to remote server"""
+        index_file = FRONTEND_DIR / "index.html"
+        if not index_file.exists():
             self.send_error(404)
-    
-    def do_OPTIONS(self):
-        # Handle CORS preflight
-        self.send_response(200)
-        self.end_headers()
-    
-    def proxy_api_request(self):
-        """Proxy API requests to remote server"""
-        import urllib.request
-        import urllib.parse
+            return
         
         try:
-            # Build remote URL
-            remote_url = f"{REMOTE_API_URL}{self.path}"
+            content = index_file.read_text(encoding='utf-8')
             
-            # Get request body if POST/PUT
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length) if content_length > 0 else None
+            # Replace API_BASE definition to point to remote server
+            pattern = r"const API_BASE = .*?;"
+            replacement = f"const API_BASE = '{REMOTE_API_URL}';"
             
-            # Create request
-            req = urllib.request.Request(remote_url, data=body)
+            if re.search(pattern, content, re.DOTALL):
+                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+            else:
+                # If pattern not found, inject before closing </head>
+                injection = f"    const API_BASE = '{REMOTE_API_URL}';\n"
+                if '</head>' in content:
+                    content = content.replace('</head>', f'  <script type="module">\n{injection}</script>\n</head>')
             
-            # Copy headers
-            for header, value in self.headers.items():
-                if header.lower() not in ['host', 'connection']:
-                    req.add_header(header, value)
+            # Send response
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(content.encode('utf-8'))
             
-            # Make request
-            with urllib.request.urlopen(req) as response:
-                # Send response
-                self.send_response(response.getcode())
-                
-                # Copy response headers
-                for header, value in response.headers.items():
-                    if header.lower() not in ['connection', 'transfer-encoding']:
-                        self.send_header(header, value)
-                
-                self.end_headers()
-                self.wfile.write(response.read())
-                
         except Exception as e:
-            print(f"Error proxying API request: {e}")
-            self.send_error(502, f"Proxy error: {str(e)}")
-
-def inject_api_config():
-    """Inject API_BASE configuration into frontend via script injection"""
-    # We'll inject a script tag that overrides API_BASE
-    # This way we don't modify the original file
-    return True  # Configuration handled by script tag injection
+            print(f"Error serving index.html: {e}")
+            self.send_error(500)
 
 def main():
     """Start the local client server"""
@@ -113,14 +89,11 @@ def main():
         print(f"ERROR: Frontend index.html not found")
         sys.exit(1)
     
-    # Inject API configuration
-    inject_api_config()
-    
     # Start server
     try:
         with socketserver.TCPServer(("", PORT), LocalClientHandler) as httpd:
             print(f"\n✓ Server started on http://localhost:{PORT}")
-            print(f"✓ Connecting to remote API: {REMOTE_API_URL}")
+            print(f"✓ Frontend will connect to: {REMOTE_API_URL}")
             print(f"\nOpening browser...")
             print(f"Press Ctrl+C to stop\n")
             
@@ -133,13 +106,13 @@ def main():
     except KeyboardInterrupt:
         print("\n\nShutting down server...")
     except OSError as e:
-        if e.errno == 98:  # Address already in use
+        if e.errno == 98 or "Address already in use" in str(e):  # Address already in use
             print(f"\nERROR: Port {PORT} is already in use.")
             print(f"Set LOCAL_CLIENT_PORT environment variable to use a different port.")
+            print(f"Example: LOCAL_CLIENT_PORT=8081 python local_client.py")
         else:
             print(f"\nERROR: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-
