@@ -175,6 +175,37 @@ BRIGHT_DATA_PROXY = is_bright_data_proxy(YOUTUBE_PROXY) if YOUTUBE_PROXY else Fa
 # Store original proxy URL for fallback retries
 YOUTUBE_PROXY_ORIGINAL = YOUTUBE_PROXY
 
+# Bright Data Unlocker API HTTP endpoint support
+def fetch_via_unlocker_api(url, video_id):
+    """Fetch YouTube page via Bright Data Unlocker API HTTP endpoint"""
+    if not BRIGHT_DATA_UNLOCKER_API_KEY or not BRIGHT_DATA_UNLOCKER_ZONE:
+        return None
+    
+    try:
+        api_url = "https://api.brightdata.com/request"
+        headers = {
+            "Authorization": f"Bearer {BRIGHT_DATA_UNLOCKER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "url": url,
+            "zone": BRIGHT_DATA_UNLOCKER_ZONE,
+            "format": "raw"  # Get raw HTML
+        }
+        
+        print(f"[{video_id}] Trying Bright Data Unlocker API HTTP endpoint...")
+        response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            print(f"[{video_id}] Unlocker API HTTP endpoint succeeded!")
+            return response.text  # Return HTML content
+        else:
+            print(f"[{video_id}] Unlocker API HTTP endpoint failed: {response.status_code} - {response.text[:200]}")
+            return None
+    except Exception as e:
+        print(f"[{video_id}] Unlocker API HTTP endpoint error: {str(e)}")
+        return None
+
 # Normalize Bright Data proxy URL (try https:// first for HTTPS destinations)
 if BRIGHT_DATA_PROXY:
     YOUTUBE_PROXY = normalize_bright_data_proxy(YOUTUBE_PROXY)
@@ -468,6 +499,26 @@ def run_ytdlp(video_id, url):
             elif '403' in error_output or 'forbidden' in error_output or 'tunnel connection failed' in error_output:
                 print(f"[{video_id}] Proxy connection failed with 403/forbidden error")
                 print(f"[{video_id}] This may indicate YouTube is blocking Bright Data proxy IPs")
+        
+        # Final fallback: Try Bright Data Unlocker API HTTP endpoint if all proxy attempts failed
+        if info_result.returncode != 0 and BRIGHT_DATA_UNLOCKER_API_KEY and BRIGHT_DATA_UNLOCKER_ZONE:
+            print(f"[{video_id}] All proxy methods failed, trying Bright Data Unlocker API HTTP endpoint...")
+            html_content = fetch_via_unlocker_api(url, video_id)
+            if html_content:
+                # Unlocker API can fetch the page, so YouTube is accessible
+                # Extract basic video info from HTML (title, etc.)
+                import re
+                title_match = re.search(r'<title>([^<]+)</title>', html_content)
+                if title_match:
+                    title = title_match.group(1).replace(' - YouTube', '').strip()
+                    print(f"[{video_id}] Unlocker API extracted title: {title}")
+                    downloads[video_id]["title"] = title
+                
+                # Note: yt-dlp still needs to make its own requests for video download
+                # The Unlocker API HTTP endpoint confirms YouTube is accessible
+                # but yt-dlp may still fail due to bot detection on subsequent requests
+                print(f"[{video_id}] NOTE: Unlocker API HTTP endpoint can access YouTube, but yt-dlp may still fail")
+                print(f"[{video_id}] Consider configuring your Bright Data zone for Unlocker API (native proxy mode)")
         
         # If mweb client fails with PO Token or format issues, try android client as fallback
         if info_result.returncode != 0 and player_client == "mweb" and has_cookies:
