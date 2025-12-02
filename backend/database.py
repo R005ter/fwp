@@ -82,15 +82,21 @@ def get_db():
                 print(f"✗ Connection failed: {error_msg}")
                 
                 # If port 6543 fails, suggest trying port 5432 (direct connection)
-                if port == 6543 and "Network is unreachable" in error_msg:
-                    print("\n💡 Port 6543 (connection pooling) may not be accessible from Render.")
+                if port == 6543 and ("Network is unreachable" in error_msg or "IPv6" in error_msg or "2600:" in error_msg):
+                    print("\n💡 Port 6543 (connection pooling) may not be accessible from Render due to IPv6 issues.")
                     print("   Try using port 5432 (direct connection) instead:")
-                    print("   Update DATABASE_URL in Render to use port 5432")
+                    print("   Update DATABASE_URL in Render environment variables:")
+                    print("   Change port from :6543 to :5432")
                     print("   Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
+                    raise psycopg2.OperationalError(
+                        f"Port 6543 connection pooling not accessible from Render. "
+                        f"Please update DATABASE_URL to use port 5432 (direct connection). "
+                        f"Original error: {error_msg}"
+                    )
                 else:
                     print("\n💡 Troubleshooting tips:")
                     print("   1. Verify your Supabase connection string in Render environment variables")
-                    print("   2. Try port 5432 (direct) instead of 6543 (connection pooling)")
+                    print("   2. If using port 6543, try port 5432 (direct connection) instead")
                     print("   3. Check Supabase Dashboard → Settings → Database → Connection string")
                     print("   4. Ensure your Supabase project is active")
                 raise
