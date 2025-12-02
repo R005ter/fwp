@@ -70,6 +70,9 @@ VIDEOS_DIR.mkdir(exist_ok=True)
 LOCAL_DOWNLOADER_MODE = os.environ.get('LOCAL_DOWNLOADER_MODE', '').lower() == 'true'
 REMOTE_SERVER_URL = os.environ.get('REMOTE_SERVER_URL', '').strip().rstrip('/')
 
+# Determine if this is web client (Render) or local client
+IS_WEB_CLIENT = not LOCAL_DOWNLOADER_MODE and (os.environ.get('RENDER') == 'true' or os.environ.get('PORT'))
+
 # Cookies file for YouTube (to avoid bot detection)
 COOKIES_FILE = Path(__file__).parent / "youtube_cookies.txt"
 # Check if cookies are provided via environment variable (base64 encoded)
@@ -987,18 +990,25 @@ def upload_video():
         file_size = filepath.stat().st_size
         
         print(f"[upload] Received video upload: {filename} ({file_size / 1024 / 1024:.2f} MB)")
-        print(f"[upload]   - youtube_url: {youtube_url}")
+        print(f"[upload]   - youtube_url: {youtube_url or '(direct upload)'}")
         print(f"[upload]   - title: {title}")
         print(f"[upload]   - user_id: {user_id}")
         
-        # Check if video already exists
-        existing = get_video_by_youtube_url(youtube_url)
+        # Check if video already exists (by youtube_url if provided, or by filename)
+        existing = None
+        if youtube_url:
+            existing = get_video_by_youtube_url(youtube_url)
+        else:
+            # For direct MP4 uploads without youtube_url, check by filename
+            from database import get_video_by_filename
+            existing = get_video_by_filename(filename)
+        
         if existing:
             video_db_id = existing['id']
             print(f"[upload] Video already exists (ID: {video_db_id}), using existing entry")
         else:
             # Create new video entry
-            video_db_id = create_video(filename, youtube_url, title, file_size)
+            video_db_id = create_video(filename, youtube_url if youtube_url else None, title, file_size)
             if video_db_id:
                 print(f"[upload] ✓ Video registered (ID: {video_db_id})")
             else:
@@ -1008,7 +1018,7 @@ def upload_video():
         if video_db_id:
             add_video_to_library(user_id, video_db_id, {
                 "title": title,
-                "sourceUrl": youtube_url
+                "sourceUrl": youtube_url if youtube_url else f"uploaded:{filename}"
             })
             print(f"[upload] ✓ Video added to user's library")
         
