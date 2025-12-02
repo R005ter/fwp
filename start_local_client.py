@@ -117,14 +117,12 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
         return originalFetch(url, options);
       }};
       
-      // Ensure OAuth redirects back to local frontend
-      // The frontend code already uses window.location.origin, but we'll ensure it's correct
+      // Ensure OAuth redirects back to local frontend with frontend_url parameter
       window.addEventListener('DOMContentLoaded', function() {{
-        // Override window.location.origin if needed (for OAuth redirects)
-        const originalOrigin = window.location.origin;
-        if (originalOrigin !== LOCAL_FRONTEND_URL) {{
-          console.log('[Local Client] Detected origin mismatch, OAuth will use:', LOCAL_FRONTEND_URL);
-        }}
+        // The frontend code already uses window.location.origin for OAuth
+        // This will be http://localhost:8080 when running locally
+        console.log('[Local Client] Frontend origin:', window.location.origin);
+        console.log('[Local Client] OAuth will redirect back to:', window.location.origin);
       }});
     </script>
 """

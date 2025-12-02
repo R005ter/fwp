@@ -30,7 +30,16 @@ load_dotenv()
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 # Use environment variable for secret key in production, generate random one for dev
 app.secret_key = os.environ.get('SECRET_KEY') or ('dev-secret-key-' + str(uuid.uuid4()))
-CORS(app, supports_credentials=True)
+
+# CORS configuration - allow localhost for local client
+# In production (Render), allow all origins. For local client, explicitly allow localhost.
+cors_origins = ['http://localhost:8080', 'http://localhost:3000', 'http://127.0.0.1:8080']
+if os.environ.get('RENDER') == 'true':
+    # Production: allow all origins (or specify your domain)
+    CORS(app, supports_credentials=True, origins='*')
+else:
+    # Development/local: allow localhost origins
+    CORS(app, supports_credentials=True, origins=cors_origins)
 
 # Initialize OAuth
 oauth = OAuth(app)
@@ -1385,12 +1394,35 @@ def google_callback():
                 else:
                     return redirect(f"{frontend_url}#/login?error=user_creation_failed")
         
-        # Set session
+        # Set session (for web client)
         session['user_id'] = user['id']
         session['username'] = user['username']
         
-        # Redirect to frontend URL
-        return redirect(f"{frontend_url}#/dashboard")
+        # For local client: generate auth token and include in redirect URL
+        # Check if this is a local client request (localhost origin)
+        is_local_client = 'localhost' in frontend_url or '127.0.0.1' in frontend_url
+        
+        if is_local_client:
+            # Generate a simple auth token (user_id + timestamp hash)
+            import hashlib
+            import time
+            token_data = f"{user['id']}:{time.time()}"
+            auth_token = hashlib.sha256(f"{token_data}:{app.secret_key}".encode()).hexdigest()[:32]
+            
+            # Store token temporarily (could use Redis in production, but for now use a simple dict)
+            if not hasattr(app, 'auth_tokens'):
+                app.auth_tokens = {}
+            app.auth_tokens[auth_token] = {
+                'user_id': user['id'],
+                'username': user['username'],
+                'expires': time.time() + 86400  # 24 hours
+            }
+            
+            # Redirect with token in URL
+            return redirect(f"{frontend_url}#/dashboard?token={auth_token}")
+        else:
+            # Web client: normal session-based redirect
+            return redirect(f"{frontend_url}#/dashboard")
         
     except Exception as e:
         print(f"Google OAuth error: {str(e)}")
