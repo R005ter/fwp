@@ -390,6 +390,12 @@ def run_ytdlp(video_id, url):
                             print(f"[{video_id}] Proxy username: {username}")
                 
                 info_result = subprocess.run(proxy_info_cmd, capture_output=True, text=True)
+                
+                # Log yt-dlp output for debugging
+                if info_result.returncode != 0:
+                    print(f"[{video_id}] yt-dlp stderr (first 500 chars): {info_result.stderr[:500]}")
+                else:
+                    print(f"[{video_id}] yt-dlp info fetch succeeded through proxy")
         
         # If Bright Data proxy fails with 403, try alternative format
         if info_result.returncode != 0 and BRIGHT_DATA_PROXY and YOUTUBE_PROXY_ORIGINAL and use_proxy:
@@ -403,15 +409,25 @@ def run_ytdlp(video_id, url):
                 elif alt_proxy.startswith('http://'):
                     alt_proxy = alt_proxy.replace('http://', 'https://', 1)
                 
-                # Retry with alternative format
-                alt_info_cmd = info_cmd.copy()
+                # Retry with alternative format - use proxy_info_cmd as base (it already has --proxy)
+                alt_info_cmd = proxy_info_cmd.copy()
                 # Replace proxy argument
-                proxy_idx = alt_info_cmd.index("--proxy")
-                alt_info_cmd[proxy_idx + 1] = alt_proxy
-                print(f"[{video_id}] Retrying with proxy: {alt_proxy.split('@')[-1] if '@' in alt_proxy else alt_proxy}")
-                info_result = subprocess.run(alt_info_cmd, capture_output=True, text=True)
-                if info_result.returncode == 0:
-                    proxy_to_use = alt_proxy  # Use the working format for download
+                try:
+                    proxy_idx = alt_info_cmd.index("--proxy")
+                    alt_info_cmd[proxy_idx + 1] = alt_proxy
+                    # Also update --no-check-certificate if present
+                    if "--no-check-certificate" in alt_info_cmd:
+                        # Keep it, Bright Data still needs it
+                        pass
+                    print(f"[{video_id}] Retrying with proxy: {alt_proxy.split('@')[-1] if '@' in alt_proxy else alt_proxy}")
+                    info_result = subprocess.run(alt_info_cmd, capture_output=True, text=True)
+                    if info_result.returncode == 0:
+                        proxy_to_use = alt_proxy  # Use the working format for download
+                        print(f"[{video_id}] Alternative proxy format succeeded!")
+                    else:
+                        print(f"[{video_id}] Alternative proxy format also failed: {info_result.stderr[:500]}")
+                except ValueError:
+                    print(f"[{video_id}] ERROR: Could not find --proxy in command for retry")
         
         # If mweb client fails with PO Token or format issues, try android client as fallback
         if info_result.returncode != 0 and player_client == "mweb" and has_cookies:
