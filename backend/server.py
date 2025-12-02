@@ -365,10 +365,11 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
         if local_user and local_user.get('oauth_provider'):
             oauth_provider = local_user['oauth_provider']
             # Need to get OAuth ID from database
+            from database import execute_sql, fetch_one
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute('SELECT oauth_id FROM users WHERE id = ?', (user_id,))
-            user_row = cursor.fetchone()
+            execute_sql(cursor, 'SELECT oauth_id FROM users WHERE id = ?', (user_id,))
+            user_row = fetch_one(cursor)
             conn.close()
             if user_row and user_row.get('oauth_id'):
                 oauth_id = user_row['oauth_id']
