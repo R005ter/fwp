@@ -39,7 +39,7 @@ def get_db():
         is_supabase = 'supabase' in (parsed.hostname or '').lower()
         
         if is_supabase:
-            # Supabase: Force IPv4 and SSL
+            # Supabase: Try multiple connection strategies
             # Parse connection string to extract components
             host = parsed.hostname
             port = parsed.port or 5432
@@ -47,34 +47,56 @@ def get_db():
             user = parsed.username
             password = parsed.password
             
-            # Try connecting with explicit parameters
-            # Force IPv4 by resolving hostname to IPv4 address
-            import socket
+            # Strategy 1: Try direct connection with hostname (let psycopg2 handle DNS)
             try:
-                # Resolve hostname to IPv4 address to avoid IPv6 issues
-                ipv4_address = socket.gethostbyname(host)
-                print(f"✓ Resolved {host} to IPv4: {ipv4_address}")
-                
                 conn = psycopg2.connect(
-                    host=ipv4_address,  # Use IPv4 address instead of hostname
+                    host=host,
                     port=port,
                     database=database,
                     user=user,
                     password=password,
                     sslmode='require',
+                    connect_timeout=10,
                     cursor_factory=RealDictCursor
                 )
-            except socket.gaierror as e:
-                print(f"✗ DNS resolution failed: {str(e)}")
-                print("💡 Tip: Check your Supabase connection string")
-                raise
+                print(f"✓ Connected to Supabase: {host}:{port}")
             except psycopg2.OperationalError as e:
-                print(f"⚠ Connection failed: {str(e)}")
-                print("💡 Tip: For Supabase on Render, ensure you're using:")
-                print("   - Connection Pooling URL (port 6543) for transaction mode")
-                print("   - Or direct connection URL (port 5432) with proper SSL")
-                print("   - Settings → Database → Connection pooling")
-                raise
+                error_msg = str(e)
+                print(f"⚠ Direct connection failed: {error_msg}")
+                
+                # Strategy 2: Try with IPv4 resolution if DNS fails
+                if "No address associated with hostname" in error_msg or "could not translate hostname" in error_msg.lower():
+                    import socket
+                    try:
+                        # Try to resolve to IPv4
+                        ipv4_address = socket.gethostbyname(host)
+                        print(f"✓ Resolved {host} to IPv4: {ipv4_address}")
+                        conn = psycopg2.connect(
+                            host=ipv4_address,
+                            port=port,
+                            database=database,
+                            user=user,
+                            password=password,
+                            sslmode='require',
+                            connect_timeout=10,
+                            cursor_factory=RealDictCursor
+                        )
+                        print(f"✓ Connected using IPv4 address")
+                    except (socket.gaierror, psycopg2.OperationalError) as e2:
+                        print(f"✗ IPv4 resolution also failed: {str(e2)}")
+                        print("\n💡 Troubleshooting tips:")
+                        print("   1. Verify your Supabase connection string in Render environment variables")
+                        print("   2. For connection pooling, use port 6543 (transaction mode)")
+                        print("   3. For direct connection, use port 5432")
+                        print("   4. Check Supabase Dashboard → Settings → Database → Connection string")
+                        raise
+                else:
+                    # Other connection errors
+                    print("\n💡 Troubleshooting tips:")
+                    print("   1. Verify your Supabase connection string in Render environment variables")
+                    print("   2. Check that your Supabase project is active")
+                    print("   3. Ensure SSL is enabled (sslmode=require)")
+                    raise
         else:
             # Regular PostgreSQL connection
             conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
