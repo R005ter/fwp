@@ -319,6 +319,10 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
         print(f"[{video_id}] ERROR: REMOTE_SERVER_URL not configured")
         return False
     
+    if not user_id:
+        print(f"[{video_id}] ERROR: user_id required for upload")
+        return False
+    
     try:
         upload_url = f"{REMOTE_SERVER_URL}/api/upload-video"
         
@@ -328,24 +332,20 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
             data = {
                 'youtube_url': youtube_url,
                 'title': title,
-                'user_id': str(user_id),
+                'user_id': str(user_id),  # user_id from local session (Google OAuth)
                 'video_id': video_id
             }
             
-            # Get session cookie for authentication (if available)
-            # In local mode, we might need to pass auth token differently
-            cookies = {}
-            if 'session' in session:
-                # Try to get session cookie - this might not work in local mode
-                # Alternative: Use API key or token-based auth
-                pass
+            # Note: We're passing user_id in form data
+            # The remote server will verify the user exists
+            # For better security, we could add API key authentication later
             
             print(f"[{video_id}] Uploading {filename} ({file_path.stat().st_size / 1024 / 1024:.2f} MB) to {upload_url}...")
+            print(f"[{video_id}]   - user_id: {user_id} (from local Google OAuth session)")
             response = requests.post(
                 upload_url,
                 files=files,
                 data=data,
-                cookies=cookies,
                 timeout=300  # 5 minute timeout for large files
             )
             
@@ -936,18 +936,26 @@ def start_download():
 @app.route("/api/upload-video", methods=["POST"])
 def upload_video():
     """Receive video upload from local downloader"""
-    # Check authentication - can use session or API key
+    # Get user_id from session (if logged into remote server) or form data (from local downloader)
     user_id = None
     
-    # Try to get user_id from session first
+    # Try to get user_id from session first (if user is logged into remote server)
     if 'user_id' in session:
         user_id = session.get('user_id')
-    # Otherwise try from form data (for local downloader mode)
+        print(f"[upload] User authenticated via session: {user_id}")
+    # Otherwise get from form data (from local downloader mode)
     elif request.form.get('user_id'):
         user_id = int(request.form.get('user_id'))
+        print(f"[upload] User ID from form data (local downloader): {user_id}")
+        # Verify user exists in database
+        from database import get_user_by_id
+        user = get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": f"User {user_id} not found"}), 404
+        print(f"[upload] Verified user exists: {user.get('email', 'unknown')}")
     
     if not user_id:
-        return jsonify({"error": "Authentication required"}), 401
+        return jsonify({"error": "Authentication required. Please provide user_id or log in."}), 401
     
     # Get video file
     if 'video' not in request.files:
