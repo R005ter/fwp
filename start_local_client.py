@@ -2,6 +2,10 @@
 """
 Local Client Launcher - Handles Everything Automatically
 Starts backend in local mode + serves frontend
+
+Can be run as:
+  - Python script: python start_local_client.py
+  - Executable: FireworksPlanner.exe (after building with PyInstaller)
 """
 
 import os
@@ -14,8 +18,28 @@ import socketserver
 import threading
 from pathlib import Path
 
-# Configuration
-PROJECT_ROOT = Path(__file__).parent
+# Handle PyInstaller bundle (executable mode)
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    PROJECT_ROOT = Path(sys._MEIPASS)
+    # But we need to find the actual project directory for frontend/backend
+    # Try to find it relative to executable location
+    EXE_DIR = Path(sys.executable).parent
+    # Check if frontend/backend exist in exe directory (unpacked)
+    if (EXE_DIR / "frontend").exists():
+        PROJECT_ROOT = EXE_DIR
+    else:
+        # Try parent directory
+        if (EXE_DIR.parent / "frontend").exists():
+            PROJECT_ROOT = EXE_DIR.parent
+        else:
+            # Fallback to MEIPASS (PyInstaller temp directory)
+            PROJECT_ROOT = Path(sys._MEIPASS)
+else:
+    # Running as script
+    PROJECT_ROOT = Path(__file__).parent
+
+# Configuration (PROJECT_ROOT set above based on execution mode)
 BACKEND_DIR = PROJECT_ROOT / "backend"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 REMOTE_API_URL = os.environ.get('REMOTE_API_URL', 'https://fireworks-planner.onrender.com')
