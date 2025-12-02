@@ -784,8 +784,8 @@
           return;
         }
         
-        // Use proxy endpoint (Piped/Invidious APIs via server - no CORS, no bot detection)
-        console.log('[Download] Starting download via proxy (Piped/Invidious)...');
+        // Use yt-dlp directly (works reliably with proxy and cookies)
+        console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         setDownloading(prev => [...prev, { 
@@ -794,13 +794,13 @@
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading via proxy...',
-          serverSide: false  // This is synchronous, no polling needed
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
         }]);
         
         try {
-          console.log('[Download] Calling proxy endpoint...');
-          const res = await fetch(`${API_BASE}/api/download-proxy`, {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -808,44 +808,27 @@
           });
           
           const data = await res.json();
-          console.log('[Download] Proxy response:', data);
+          console.log('[Download] yt-dlp response:', data);
           
           if (data.error) {
-            console.error('[Download] Proxy returned error:', data.error);
-            alert(`Download failed: ${data.error}\n\nTrying fallback method...`);
-            
-            // Fallback to yt-dlp method
-            try {
-              const fallbackRes = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const fallbackData = await fallbackRes.json();
-              
-              if (fallbackData.error) {
-                throw new Error(fallbackData.error);
-              }
-              
-              // Update for polling
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: fallbackData.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              return;
-            } catch (fallbackErr) {
-              alert(`Both methods failed. Proxy: ${data.error}. Fallback: ${fallbackErr.message}`);
-              setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-              return;
-            }
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
           }
           
-          // Proxy download completed synchronously
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
           if (data.status === 'complete') {
-            console.log('[Download] Proxy download complete!');
+            console.log('[Download] Download complete!');
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
             onDownloadComplete({
               id: downloadId,
@@ -853,15 +836,13 @@
               filename: data.filename,
               title: data.title,
               status: 'complete',
-              localUrl: `${API_BASE}/videos/${data.filename}`,
-              instance: data.instance || 'Proxy'
+              localUrl: `${API_BASE}/videos/${data.filename}`
             });
             setYoutubeUrl('');
-          } else {
-            throw new Error('Unexpected response from proxy');
           }
+          // Otherwise, polling will handle progress updates
         } catch (err) {
-          console.error('[Download] Proxy download failed:', err);
+          console.error('[Download] Download failed:', err);
           alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
@@ -1231,8 +1212,8 @@
           return;
         }
         
-        // Use proxy endpoint (Piped/Invidious APIs via server - no CORS, no bot detection)
-        console.log('[Download] Starting download via proxy (Piped/Invidious)...');
+        // Use yt-dlp directly (works reliably with proxy and cookies)
+        console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         setDownloading(prev => [...prev, { 
@@ -1241,13 +1222,13 @@
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading via proxy...',
-          serverSide: false  // This is synchronous, no polling needed
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
         }]);
         
         try {
-          console.log('[Download] Calling proxy endpoint...');
-          const res = await fetch(`${API_BASE}/api/download-proxy`, {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1255,44 +1236,27 @@
           });
           
           const data = await res.json();
-          console.log('[Download] Proxy response:', data);
+          console.log('[Download] yt-dlp response:', data);
           
           if (data.error) {
-            console.error('[Download] Proxy returned error:', data.error);
-            alert(`Download failed: ${data.error}\n\nTrying fallback method...`);
-            
-            // Fallback to yt-dlp method
-            try {
-              const fallbackRes = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const fallbackData = await fallbackRes.json();
-              
-              if (fallbackData.error) {
-                throw new Error(fallbackData.error);
-              }
-              
-              // Update for polling
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: fallbackData.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              return;
-            } catch (fallbackErr) {
-              alert(`Both methods failed. Proxy: ${data.error}. Fallback: ${fallbackErr.message}`);
-              setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-              return;
-            }
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
           }
           
-          // Proxy download completed synchronously
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
           if (data.status === 'complete') {
-            console.log('[Download] Proxy download complete!');
+            console.log('[Download] Download complete!');
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
             onDownloadComplete({
               id: downloadId,
@@ -1300,15 +1264,13 @@
               filename: data.filename,
               title: data.title,
               status: 'complete',
-              localUrl: `${API_BASE}/videos/${data.filename}`,
-              instance: data.instance || 'Proxy'
+              localUrl: `${API_BASE}/videos/${data.filename}`
             });
             setYoutubeUrl('');
-          } else {
-            throw new Error('Unexpected response from proxy');
           }
+          // Otherwise, polling will handle progress updates
         } catch (err) {
-          console.error('[Download] Proxy download failed:', err);
+          console.error('[Download] Download failed:', err);
           alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
@@ -1999,8 +1961,8 @@
           return;
         }
         
-        // Use proxy endpoint (Piped/Invidious APIs via server - no CORS, no bot detection)
-        console.log('[Download] Starting download via proxy (Piped/Invidious)...');
+        // Use yt-dlp directly (works reliably with proxy and cookies)
+        console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         setDownloading(prev => [...prev, { 
@@ -2009,13 +1971,13 @@
           videoId: videoId,
           status: 'downloading',
           progress: 0,
-          title: 'Downloading via proxy...',
-          serverSide: false  // This is synchronous, no polling needed
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
         }]);
         
         try {
-          console.log('[Download] Calling proxy endpoint...');
-          const res = await fetch(`${API_BASE}/api/download-proxy`, {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -2023,44 +1985,27 @@
           });
           
           const data = await res.json();
-          console.log('[Download] Proxy response:', data);
+          console.log('[Download] yt-dlp response:', data);
           
           if (data.error) {
-            console.error('[Download] Proxy returned error:', data.error);
-            alert(`Download failed: ${data.error}\n\nTrying fallback method...`);
-            
-            // Fallback to yt-dlp method
-            try {
-              const fallbackRes = await fetch(`${API_BASE}/api/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ url: youtubeUrl })
-              });
-              
-              const fallbackData = await fallbackRes.json();
-              
-              if (fallbackData.error) {
-                throw new Error(fallbackData.error);
-              }
-              
-              // Update for polling
-              setDownloading(prev => prev.map(dl => 
-                dl.id === downloadId 
-                  ? { ...dl, id: fallbackData.id, status: 'downloading', serverSide: true }
-                  : dl
-              ));
-              return;
-            } catch (fallbackErr) {
-              alert(`Both methods failed. Proxy: ${data.error}. Fallback: ${fallbackErr.message}`);
-              setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
-              return;
-            }
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
           }
           
-          // Proxy download completed synchronously
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
           if (data.status === 'complete') {
-            console.log('[Download] Proxy download complete!');
+            console.log('[Download] Download complete!');
             setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
             onDownloadComplete({
               id: downloadId,
@@ -2068,15 +2013,13 @@
               filename: data.filename,
               title: data.title,
               status: 'complete',
-              localUrl: `${API_BASE}/videos/${data.filename}`,
-              instance: data.instance || 'Proxy'
+              localUrl: `${API_BASE}/videos/${data.filename}`
             });
             setYoutubeUrl('');
-          } else {
-            throw new Error('Unexpected response from proxy');
           }
+          // Otherwise, polling will handle progress updates
         } catch (err) {
-          console.error('[Download] Proxy download failed:', err);
+          console.error('[Download] Download failed:', err);
           alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
           setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
         }
