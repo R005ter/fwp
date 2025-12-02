@@ -83,6 +83,19 @@ if COOKIES_ENV:
     except Exception as e:
         print(f"⚠ Warning: Could not decode YouTube cookies from env: {e}")
 
+# Proxy configuration for YouTube downloads (to avoid IP-based blocking)
+# Format: http://user:pass@host:port or http://host:port or socks5://host:port
+# Examples:
+#   - HTTP proxy: http://proxy.example.com:8080
+#   - SOCKS5 proxy: socks5://proxy.example.com:1080
+#   - Authenticated: http://user:pass@proxy.example.com:8080
+#   - Residential proxy service: http://username:password@gate.proxy-service.com:8080
+YOUTUBE_PROXY = os.environ.get('YOUTUBE_PROXY')
+if YOUTUBE_PROXY:
+    print(f"✓ YouTube proxy configured: {YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY}")
+else:
+    print("ℹ No YouTube proxy configured. Consider using a proxy service to avoid IP-based blocking on Render.")
+
 # PO Token Provider Plugin: yt-dlp-get-pot-rustypipe
 # This plugin automatically provides PO Tokens when needed by yt-dlp
 # No manual PO Token extraction required!
@@ -187,14 +200,23 @@ def run_ytdlp(video_id, url):
         
         has_cookies = cookies_file_to_use is not None
         
+        # Rotate user agents to appear more like real browsers
+        # Using desktop Chrome user agents (more reliable than mobile)
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+        ]
+        import random
+        user_agent = random.choice(user_agents)
+        
         if has_cookies:
             # mweb client - supports cookies, PO Token Provider plugin will automatically provide PO Tokens
             player_client = "mweb"
-            user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         else:
             # android client doesn't support cookies but may work without them
             player_client = "android"
-            user_agent = "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
         
         # Build extractor args - PO Token Provider plugin will automatically add PO Tokens when needed
         extractor_args = f"youtube:player_client={player_client}"
@@ -204,7 +226,18 @@ def run_ytdlp(video_id, url):
             "--extractor-args", extractor_args,
             "--user-agent", user_agent,
             "--referer", "https://www.youtube.com/",
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "--add-header", "Accept-Encoding:gzip, deflate",
+            "--add-header", "DNT:1",
+            "--add-header", "Connection:keep-alive",
+            "--add-header", "Upgrade-Insecure-Requests:1",
         ]
+        
+        # Add proxy if configured
+        if YOUTUBE_PROXY:
+            info_cmd.extend(["--proxy", YOUTUBE_PROXY])
+            print(f"[{video_id}] Using proxy: {YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY}")
         
         # Add cookies if available
         if has_cookies:
@@ -236,7 +269,17 @@ def run_ytdlp(video_id, url):
             "--extractor-args", extractor_args,  # Same extractor args (includes PO Token if available)
             "--user-agent", user_agent,
             "--referer", "https://www.youtube.com/",
+            "--add-header", "Accept-Language:en-US,en;q=0.9",
+            "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "--add-header", "Accept-Encoding:gzip, deflate",
+            "--add-header", "DNT:1",
+            "--add-header", "Connection:keep-alive",
+            "--add-header", "Upgrade-Insecure-Requests:1",
         ]
+        
+        # Add proxy if configured
+        if YOUTUBE_PROXY:
+            cmd.extend(["--proxy", YOUTUBE_PROXY])
         
         # Add cookies if available (use same cookies file as info fetch)
         if has_cookies:
@@ -489,22 +532,8 @@ def get_download_status(video_id):
     return jsonify(downloads[video_id])
 
 
-# Piped/Invidious API instances (no CORS issues when called from server)
-PIPED_INSTANCES = [
-    'https://pipedapi.kavin.rocks',
-    'https://api-piped.mha.fi',
-    'https://pipedapi.tokhmi.xyz',
-    'https://piped-api.garudalinux.org',
-    'https://pipedapi.osphost.fi'
-]
-
-INVIDIOUS_INSTANCES = [
-    'https://invidious.flokinet.to',
-    'https://invidious.io.lol',
-    'https://invidious.osi.kr',
-    'https://invidious.privacyredirect.com',
-    'https://yewtu.be'
-]
+# Piped/Invidious API instances are now defined within their respective functions
+# This allows for easier updates and better error handling
 
 
 def extract_video_id_from_url(url):
@@ -524,15 +553,55 @@ def extract_video_id_from_url(url):
 
 def download_via_piped_api(video_id):
     """Download video using Piped API (server-side, no CORS)"""
-    for instance in PIPED_INSTANCES:
+    # Updated list of Piped instances (some may be more reliable)
+    # You can add more instances from: https://github.com/TeamPiped/Piped/wiki/Instances
+    piped_instances = [
+        'https://pipedapi.kavin.rocks',
+        'https://api-piped.mha.fi',
+        'https://pipedapi.tokhmi.xyz',
+        'https://piped-api.garudalinux.org',
+        'https://pipedapi.osphost.fi',
+        'https://piped.privacyredirect.com',
+        'https://pipedapi.leptons.xyz',
+    ]
+    
+    # Use proxy if configured
+    proxies = None
+    if YOUTUBE_PROXY:
+        proxies = {
+            'http': YOUTUBE_PROXY,
+            'https': YOUTUBE_PROXY
+        }
+    
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+    }
+    
+    for instance in piped_instances:
         try:
             print(f"[Piped] Trying instance: {instance}")
-            # Get video info
+            # Get video info with retry
             info_url = f"{instance}/streams/{video_id}"
-            response = requests.get(info_url, timeout=10, headers={'Accept': 'application/json'})
+            response = None
+            for attempt in range(3):
+                try:
+                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies)
+                    if response.status_code == 200:
+                        break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                    if attempt < 2:
+                        print(f"[Piped] Attempt {attempt + 1} failed, retrying...")
+                        import time
+                        time.sleep(1 * (attempt + 1))  # Exponential backoff
+                        continue
+                    else:
+                        raise
             
-            if response.status_code != 200:
-                print(f"[Piped] Instance {instance} returned {response.status_code}")
+            if not response or response.status_code != 200:
+                print(f"[Piped] Instance {instance} returned {response.status_code if response else 'no response'}")
                 continue
             
             video_info = response.json()
@@ -560,10 +629,24 @@ def download_via_piped_api(video_id):
             
             print(f"[Piped] Found video URL, downloading from {instance}...")
             
-            # Download the video
-            video_response = requests.get(video_url, stream=True, timeout=30)
-            if video_response.status_code != 200:
-                print(f"[Piped] Video download failed: {video_response.status_code}")
+            # Download the video with retry
+            video_response = None
+            for attempt in range(3):
+                try:
+                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies)
+                    if video_response.status_code == 200:
+                        break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                    if attempt < 2:
+                        print(f"[Piped] Download attempt {attempt + 1} failed, retrying...")
+                        import time
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    else:
+                        raise
+            
+            if not video_response or video_response.status_code != 200:
+                print(f"[Piped] Video download failed: {video_response.status_code if video_response else 'no response'}")
                 continue
             
             # Save to file
@@ -597,15 +680,54 @@ def download_via_piped_api(video_id):
 
 def download_via_invidious_api(video_id):
     """Download video using Invidious API (server-side, no CORS)"""
-    for instance in INVIDIOUS_INSTANCES:
+    # Updated list of Invidious instances
+    # You can find more at: https://api.invidious.io/
+    invidious_instances = [
+        'https://invidious.flokinet.to',
+        'https://invidious.io.lol',
+        'https://invidious.osi.kr',
+        'https://invidious.privacyredirect.com',
+        'https://yewtu.be',
+        'https://invidious.nerdvpn.de',
+        'https://inv.riverside.rocks',
+    ]
+    
+    # Use proxy if configured
+    proxies = None
+    if YOUTUBE_PROXY:
+        proxies = {
+            'http': YOUTUBE_PROXY,
+            'https': YOUTUBE_PROXY
+        }
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+    }
+    
+    for instance in invidious_instances:
         try:
             print(f"[Invidious] Trying instance: {instance}")
-            # Get video info
+            # Get video info with retry
             info_url = f"{instance}/api/v1/videos/{video_id}"
-            response = requests.get(info_url, timeout=10)
+            response = None
+            for attempt in range(3):
+                try:
+                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies)
+                    if response.status_code == 200:
+                        break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                    if attempt < 2:
+                        print(f"[Invidious] Attempt {attempt + 1} failed, retrying...")
+                        import time
+                        time.sleep(1 * (attempt + 1))
+                        continue
+                    else:
+                        raise
             
-            if response.status_code != 200:
-                print(f"[Invidious] Instance {instance} returned {response.status_code}")
+            if not response or response.status_code != 200:
+                print(f"[Invidious] Instance {instance} returned {response.status_code if response else 'no response'}")
                 continue
             
             video_info = response.json()
@@ -626,10 +748,24 @@ def download_via_invidious_api(video_id):
             
             print(f"[Invidious] Found video URL, downloading from {instance}...")
             
-            # Download the video
-            video_response = requests.get(video_url, stream=True, timeout=30)
-            if video_response.status_code != 200:
-                print(f"[Invidious] Video download failed: {video_response.status_code}")
+            # Download the video with retry
+            video_response = None
+            for attempt in range(3):
+                try:
+                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies)
+                    if video_response.status_code == 200:
+                        break
+                except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                    if attempt < 2:
+                        print(f"[Invidious] Download attempt {attempt + 1} failed, retrying...")
+                        import time
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    else:
+                        raise
+            
+            if not video_response or video_response.status_code != 200:
+                print(f"[Invidious] Video download failed: {video_response.status_code if video_response else 'no response'}")
                 continue
             
             # Save to file
