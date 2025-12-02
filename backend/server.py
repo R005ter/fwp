@@ -112,6 +112,35 @@ def normalize_bright_data_proxy(proxy_url):
     
     return proxy_url
 
+def add_bright_data_session(proxy_url):
+    """Add session ID to Bright Data proxy username for IP rotation"""
+    if not proxy_url or not is_bright_data_proxy(proxy_url):
+        return proxy_url
+    
+    import random
+    import string
+    
+    # Generate random session ID (8 characters)
+    session_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    
+    # Parse proxy URL: http://username:password@host:port
+    if '@' in proxy_url:
+        protocol_part = proxy_url.split('://')[0] + '://'
+        rest = proxy_url.split('://')[1]
+        username_password = rest.split('@')[0]
+        host_port = rest.split('@')[1]
+        
+        username, password = username_password.split(':', 1)
+        
+        # Add session to username: brd-customer-XXX-zone-YYY-session-ABC123
+        # Also add country targeting for better success: -country-us
+        if 'session-' not in username:
+            username = f"{username}-session-{session_id}-country-us"
+        
+        return f"{protocol_part}{username}:{password}@{host_port}"
+    
+    return proxy_url
+
 # Bright Data proxies do SSL interception, so we need to disable SSL verification
 BRIGHT_DATA_PROXY = is_bright_data_proxy(YOUTUBE_PROXY) if YOUTUBE_PROXY else False
 
@@ -252,11 +281,16 @@ def run_ytdlp(video_id, url):
         import random
         user_agent = random.choice(user_agents)
         
-        if has_cookies:
+        # Client selection strategy:
+        # - With cookies + direct connection: try mweb first (better quality, supports cookies)
+        # - With proxy: use android first (more reliable with proxies, doesn't require PO tokens)
+        # - Without cookies: use android (doesn't support cookies anyway)
+        will_use_proxy = YOUTUBE_PROXY is not None  # We'll try proxy if direct fails
+        if has_cookies and not will_use_proxy:
             # mweb client - supports cookies, PO Token Provider plugin will automatically provide PO Tokens
             player_client = "mweb"
         else:
-            # android client doesn't support cookies but may work without them
+            # android client - more reliable with proxies, doesn't require PO tokens or cookies
             player_client = "android"
         
         # Build extractor args - PO Token Provider plugin will automatically add PO Tokens when needed
@@ -303,11 +337,38 @@ def run_ytdlp(video_id, url):
             # Check if it's a bot detection or connection error (not other errors)
             if any(keyword in error_output for keyword in ['bot', 'sign in', 'unable to download', '403', '429', 'blocked']):
                 print(f"[{video_id}] Direct connection failed, trying with proxy...")
-                proxy_to_use = YOUTUBE_PROXY
+                
+                # For Bright Data proxies, add session ID for IP rotation and country targeting
+                if BRIGHT_DATA_PROXY:
+                    proxy_to_use = add_bright_data_session(YOUTUBE_PROXY)
+                    print(f"[{video_id}] Using session-based Bright Data proxy (new IP per request)")
+                else:
+                    proxy_to_use = YOUTUBE_PROXY
+                
                 use_proxy = True
                 
-                # Build new command with proxy
+                # When using proxy, switch to android client (more reliable with proxies)
+                if player_client == "mweb":
+                    print(f"[{video_id}] Switching to android client for proxy (more reliable)")
+                    player_client = "android"
+                    extractor_args = f"youtube:player_client={player_client}"
+                    # Update info_cmd with new client
+                    extractor_idx = info_cmd.index("--extractor-args")
+                    info_cmd[extractor_idx + 1] = extractor_args
+                
+                # Build new command with proxy (use updated player_client if we switched to android)
                 proxy_info_cmd = info_cmd.copy()
+                # Update extractor args if we switched to android client
+                if player_client == "android" and "--extractor-args" in proxy_info_cmd:
+                    extractor_idx = proxy_info_cmd.index("--extractor-args")
+                    proxy_info_cmd[extractor_idx + 1] = extractor_args
+                    # Remove cookies if present (android client doesn't support cookies)
+                    if "--cookies" in proxy_info_cmd:
+                        cookies_idx = proxy_info_cmd.index("--cookies")
+                        proxy_info_cmd.pop(cookies_idx)  # Remove --cookies
+                        proxy_info_cmd.pop(cookies_idx)  # Remove cookies file path
+                        print(f"[{video_id}] Removed cookies (android client doesn't support cookies)")
+                
                 # Insert proxy before --dump-json (which is at index -3: --dump-json, --no-download, url)
                 proxy_idx = len(proxy_info_cmd) - 3
                 proxy_info_cmd.insert(proxy_idx, "--proxy")
