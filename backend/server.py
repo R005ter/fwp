@@ -89,10 +89,25 @@ if COOKIES_ENV:
 #   - HTTP proxy: http://proxy.example.com:8080
 #   - SOCKS5 proxy: socks5://proxy.example.com:1080
 #   - Authenticated: http://user:pass@proxy.example.com:8080
-#   - Residential proxy service: http://username:password@gate.proxy-service.com:8080
+#   - Bright Data residential: http://brd-customer-XXX-zone-YYY:password@brd.superproxy.io:33335
 YOUTUBE_PROXY = os.environ.get('YOUTUBE_PROXY')
+
+def is_bright_data_proxy(proxy_url):
+    """Check if proxy is Bright Data (formerly Luminati)"""
+    if not proxy_url:
+        return False
+    bright_data_hosts = ['brd.superproxy.io', 'lum-superproxy.io', 'zproxy.lum-superproxy.io']
+    return any(host in proxy_url for host in bright_data_hosts)
+
+# Bright Data proxies do SSL interception, so we need to disable SSL verification
+BRIGHT_DATA_PROXY = is_bright_data_proxy(YOUTUBE_PROXY) if YOUTUBE_PROXY else False
+
 if YOUTUBE_PROXY:
-    print(f"✓ YouTube proxy configured: {YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY}")
+    proxy_display = YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY
+    proxy_type = "Bright Data residential" if BRIGHT_DATA_PROXY else "proxy"
+    print(f"✓ YouTube {proxy_type} configured: {proxy_display}")
+    if BRIGHT_DATA_PROXY:
+        print("  ℹ SSL verification will be disabled for Bright Data proxy (required for SSL interception)")
 else:
     print("ℹ No YouTube proxy configured. Consider using a proxy service to avoid IP-based blocking on Render.")
 
@@ -237,7 +252,12 @@ def run_ytdlp(video_id, url):
         # Add proxy if configured
         if YOUTUBE_PROXY:
             info_cmd.extend(["--proxy", YOUTUBE_PROXY])
-            print(f"[{video_id}] Using proxy: {YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY}")
+            proxy_display = YOUTUBE_PROXY.split('@')[-1] if '@' in YOUTUBE_PROXY else YOUTUBE_PROXY
+            print(f"[{video_id}] Using proxy: {proxy_display}")
+            # Bright Data proxies require disabling SSL verification due to SSL interception
+            if BRIGHT_DATA_PROXY:
+                info_cmd.extend(["--no-check-certificate"])
+                print(f"[{video_id}] SSL verification disabled for Bright Data proxy")
         
         # Add cookies if available
         if has_cookies:
@@ -280,6 +300,9 @@ def run_ytdlp(video_id, url):
         # Add proxy if configured
         if YOUTUBE_PROXY:
             cmd.extend(["--proxy", YOUTUBE_PROXY])
+            # Bright Data proxies require disabling SSL verification due to SSL interception
+            if BRIGHT_DATA_PROXY:
+                cmd.extend(["--no-check-certificate"])
         
         # Add cookies if available (use same cookies file as info fetch)
         if has_cookies:
@@ -567,11 +590,16 @@ def download_via_piped_api(video_id):
     
     # Use proxy if configured
     proxies = None
+    verify_ssl = True  # Default to verifying SSL certificates
     if YOUTUBE_PROXY:
         proxies = {
             'http': YOUTUBE_PROXY,
             'https': YOUTUBE_PROXY
         }
+        # Bright Data proxies do SSL interception, so we must disable SSL verification
+        if BRIGHT_DATA_PROXY:
+            verify_ssl = False
+            print(f"[Piped] Using Bright Data proxy - SSL verification disabled")
     
     headers = {
         'Accept': 'application/json',
@@ -588,12 +616,12 @@ def download_via_piped_api(video_id):
             response = None
             for attempt in range(3):
                 try:
-                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies)
+                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies, verify=verify_ssl)
                     if response.status_code == 200:
                         break
                 except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
                     if attempt < 2:
-                        print(f"[Piped] Attempt {attempt + 1} failed, retrying...")
+                        print(f"[Piped] Attempt {attempt + 1} failed: {str(e)[:100]}, retrying...")
                         import time
                         time.sleep(1 * (attempt + 1))  # Exponential backoff
                         continue
@@ -633,12 +661,12 @@ def download_via_piped_api(video_id):
             video_response = None
             for attempt in range(3):
                 try:
-                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies)
+                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies, verify=verify_ssl)
                     if video_response.status_code == 200:
                         break
                 except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
                     if attempt < 2:
-                        print(f"[Piped] Download attempt {attempt + 1} failed, retrying...")
+                        print(f"[Piped] Download attempt {attempt + 1} failed: {str(e)[:100]}, retrying...")
                         import time
                         time.sleep(2 * (attempt + 1))
                         continue
@@ -694,11 +722,16 @@ def download_via_invidious_api(video_id):
     
     # Use proxy if configured
     proxies = None
+    verify_ssl = True  # Default to verifying SSL certificates
     if YOUTUBE_PROXY:
         proxies = {
             'http': YOUTUBE_PROXY,
             'https': YOUTUBE_PROXY
         }
+        # Bright Data proxies do SSL interception, so we must disable SSL verification
+        if BRIGHT_DATA_PROXY:
+            verify_ssl = False
+            print(f"[Invidious] Using Bright Data proxy - SSL verification disabled")
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -714,12 +747,12 @@ def download_via_invidious_api(video_id):
             response = None
             for attempt in range(3):
                 try:
-                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies)
+                    response = requests.get(info_url, timeout=15, headers=headers, proxies=proxies, verify=verify_ssl)
                     if response.status_code == 200:
                         break
                 except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
                     if attempt < 2:
-                        print(f"[Invidious] Attempt {attempt + 1} failed, retrying...")
+                        print(f"[Invidious] Attempt {attempt + 1} failed: {str(e)[:100]}, retrying...")
                         import time
                         time.sleep(1 * (attempt + 1))
                         continue
@@ -752,12 +785,12 @@ def download_via_invidious_api(video_id):
             video_response = None
             for attempt in range(3):
                 try:
-                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies)
+                    video_response = requests.get(video_url, stream=True, timeout=60, headers=headers, proxies=proxies, verify=verify_ssl)
                     if video_response.status_code == 200:
                         break
                 except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
                     if attempt < 2:
-                        print(f"[Invidious] Download attempt {attempt + 1} failed, retrying...")
+                        print(f"[Invidious] Download attempt {attempt + 1} failed: {str(e)[:100]}, retrying...")
                         import time
                         time.sleep(2 * (attempt + 1))
                         continue

@@ -63,6 +63,17 @@ YOUTUBE_PROXY=http://customer-USERNAME:PASSWORD@pr.oxylabs.io:7777
 YOUTUBE_PROXY=http://username:password@gate.smartproxy.com:10000
 ```
 
+#### Bright Data (formerly Luminati) - Residential Proxies
+```
+YOUTUBE_PROXY=http://brd-customer-XXX-zone-YYY:password@brd.superproxy.io:33335
+```
+
+**Important for Bright Data:**
+- Bright Data proxies do SSL interception, so SSL verification is automatically disabled
+- Use port `33335` for residential proxies
+- Format: `brd-customer-<customer_id>-zone-<zone_name>` for username
+- The code automatically detects Bright Data proxies and handles SSL verification
+
 #### ScraperAPI (if they support proxy format)
 ```
 YOUTUBE_PROXY=http://scraperapi:API_KEY@proxy.scraperapi.com:8001
