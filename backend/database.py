@@ -411,7 +411,9 @@ def create_user(username, email, password=None, oauth_provider=None, oauth_id=No
                 'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
                 (username, email, password_hash, oauth_provider, oauth_id)
             )
-            user_id = cursor.fetchone()[0]
+            # PostgreSQL with RealDictCursor returns dict-like rows
+            result = cursor.fetchone()
+            user_id = result['id'] if result else None
         else:
             execute_sql(cursor,
                 'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (?, ?, ?, ?, ?)',
