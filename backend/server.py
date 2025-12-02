@@ -352,6 +352,49 @@ def run_ytdlp(video_id, url):
                 if info_result.returncode == 0:
                     proxy_to_use = alt_proxy  # Use the working format for download
         
+        # If mweb client fails with PO Token or format issues, try android client as fallback
+        if info_result.returncode != 0 and player_client == "mweb" and has_cookies:
+            error_output = info_result.stderr.lower()
+            # Check for PO Token issues, format availability issues, or challenge solving failures
+            if any(keyword in error_output for keyword in ['po token', 'format is not available', 'only images', 'challenge solving failed', 'gvs po token']):
+                print(f"[{video_id}] mweb client failed, trying android client as fallback...")
+                player_client = "android"
+                extractor_args = f"youtube:player_client={player_client}"
+                
+                # Build new command with android client (no cookies for android)
+                android_info_cmd = [
+                    "yt-dlp",
+                    "--extractor-args", extractor_args,
+                    "--user-agent", user_agent,
+                    "--referer", "https://www.youtube.com/",
+                    "--add-header", "Accept-Language:en-US,en;q=0.9",
+                    "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "--add-header", "Accept-Encoding:gzip, deflate",
+                    "--add-header", "DNT:1",
+                    "--add-header", "Connection:keep-alive",
+                    "--add-header", "Upgrade-Insecure-Requests:1",
+                ]
+                
+                # Add proxy if we were using it
+                if proxy_to_use and use_proxy:
+                    android_info_cmd.extend(["--proxy", proxy_to_use])
+                    if BRIGHT_DATA_PROXY:
+                        android_info_cmd.extend(["--no-check-certificate"])
+                
+                android_info_cmd.extend([
+                    "--dump-json",
+                    "--no-download",
+                    url
+                ])
+                
+                print(f"[{video_id}] Fetching video info with android client...")
+                info_result = subprocess.run(android_info_cmd, capture_output=True, text=True)
+                if info_result.returncode == 0:
+                    print(f"[{video_id}] android client succeeded!")
+                else:
+                    print(f"[{video_id}] android client also failed")
+                    print(f"[{video_id}] stderr: {info_result.stderr}")
+        
         if info_result.returncode == 0:
             info = json.loads(info_result.stdout)
             downloads[video_id]["title"] = info.get("title", "Unknown")
@@ -379,10 +422,10 @@ def run_ytdlp(video_id, url):
                 print(f"[{video_id}]      (Bright Data dashboard → Zone → Security Settings → IP Allowlist)")
         
         # Now download - ensuring merged audio+video output
-        # Use same client and extractor args as info fetch
+        # Use same client and extractor args as info fetch (may have been changed to android if mweb failed)
         cmd = [
             "yt-dlp",
-            "--extractor-args", extractor_args,  # Same extractor args (includes PO Token if available)
+            "--extractor-args", extractor_args,  # Use the working client (may be android if mweb failed)
             "--user-agent", user_agent,
             "--referer", "https://www.youtube.com/",
             "--add-header", "Accept-Language:en-US,en;q=0.9",
@@ -400,10 +443,12 @@ def run_ytdlp(video_id, url):
             if BRIGHT_DATA_PROXY:
                 cmd.extend(["--no-check-certificate"])
         
-        # Add cookies if available (use same cookies file as info fetch)
-        if has_cookies:
+        # Add cookies if available and using mweb client (android doesn't support cookies)
+        if has_cookies and player_client == "mweb":
             cmd.extend(["--cookies", str(cookies_file_to_use)])
             print(f"[{video_id}] Using cookies {cookie_source} with {player_client} client")
+        elif player_client == "android":
+            print(f"[{video_id}] Using {player_client} client (no cookies - android client doesn't support cookies)")
         else:
             print(f"[{video_id}] WARNING: No cookies found. Downloads may fail due to bot detection. Please add your YouTube cookies in Settings.")
         
