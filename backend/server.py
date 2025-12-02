@@ -975,12 +975,10 @@ def upload_video():
     if video_file.filename == '':
         return jsonify({"error": "No video file selected"}), 400
     
-    youtube_url = request.form.get('youtube_url')
+    # youtube_url is optional - required for YouTube downloads, optional for direct MP4 uploads
+    youtube_url = request.form.get('youtube_url', '')
     title = request.form.get('title', video_file.filename)
     video_id = request.form.get('video_id', '')
-    
-    if not youtube_url:
-        return jsonify({"error": "youtube_url required"}), 400
     
     try:
         # Save uploaded file
