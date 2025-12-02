@@ -31,9 +31,8 @@ def get_db():
     """Get database connection"""
     if USE_POSTGRES:
         # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
-        conn = psycopg2.connect(DATABASE_URL)
         # Use RealDictCursor to get dict-like rows (similar to SQLite Row)
-        conn.cursor_factory = RealDictCursor
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         return conn
     else:
         conn = sqlite3.connect(DB_PATH)
