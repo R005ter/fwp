@@ -126,35 +126,70 @@ def get_table_info(cursor, table_name):
 
 def init_db():
     """Initialize database tables"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # Determine primary key syntax
-    if USE_POSTGRES:
-        pk_syntax = "SERIAL PRIMARY KEY"
-        text_type = "TEXT"
-        int_type = "INTEGER"
-        timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
-    else:
-        pk_syntax = "INTEGER PRIMARY KEY AUTOINCREMENT"
-        text_type = "TEXT"
-        int_type = "INTEGER"
-        timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
-    
-    # Users table - supports both local and OAuth users
-    execute_sql(cursor, f'''
-        CREATE TABLE IF NOT EXISTS users (
-            id {pk_syntax},
-            username {text_type} UNIQUE NOT NULL,
-            email {text_type},
-            password_hash {text_type},
-            oauth_provider {text_type},
-            oauth_id {text_type},
-            youtube_cookies {text_type},
-            created_at TIMESTAMP {timestamp_default},
-            UNIQUE(oauth_provider, oauth_id)
-        )
-    ''')
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Determine primary key syntax
+        if USE_POSTGRES:
+            pk_syntax = "SERIAL PRIMARY KEY"
+            text_type = "TEXT"
+            int_type = "INTEGER"
+            timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
+        else:
+            pk_syntax = "INTEGER PRIMARY KEY AUTOINCREMENT"
+            text_type = "TEXT"
+            int_type = "INTEGER"
+            timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
+        
+        # Users table - supports both local and OAuth users
+        try:
+            # PostgreSQL: UNIQUE constraint on nullable columns needs special handling
+            if USE_POSTGRES:
+                # Create table first
+                execute_sql(cursor, f'''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id {pk_syntax},
+                        username {text_type} UNIQUE NOT NULL,
+                        email {text_type},
+                        password_hash {text_type},
+                        oauth_provider {text_type},
+                        oauth_id {text_type},
+                        youtube_cookies {text_type},
+                        created_at TIMESTAMP {timestamp_default}
+                    )
+                ''')
+                # Add unique constraint separately (PostgreSQL allows NULL in unique constraints)
+                try:
+                    execute_sql(cursor, '''
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth 
+                        ON users(oauth_provider, oauth_id) 
+                        WHERE oauth_provider IS NOT NULL AND oauth_id IS NOT NULL
+                    ''')
+                except Exception as idx_error:
+                    # Index might already exist or constraint might be different
+                    print(f"⚠ Note on OAuth unique constraint: {str(idx_error)}")
+            else:
+                # SQLite: Can use inline UNIQUE constraint
+                execute_sql(cursor, f'''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id {pk_syntax},
+                        username {text_type} UNIQUE NOT NULL,
+                        email {text_type},
+                        password_hash {text_type},
+                        oauth_provider {text_type},
+                        oauth_id {text_type},
+                        youtube_cookies {text_type},
+                        created_at TIMESTAMP {timestamp_default},
+                        UNIQUE(oauth_provider, oauth_id)
+                    )
+                ''')
+            print("✓ Created/verified users table")
+        except Exception as e:
+            print(f"✗ Error creating users table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
     
     # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
     # Check if columns exist and add them if missing (works for both SQLite and PostgreSQL)
@@ -216,47 +251,77 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_oauth ON users(oauth_provider, oauth_id)
     ''')
     
-    # Shows table (user's saved shows)
-    execute_sql(cursor, f'''
-        CREATE TABLE IF NOT EXISTS shows (
-            id {pk_syntax},
-            user_id {int_type} NOT NULL,
-            name {text_type} NOT NULL,
-            data {text_type} NOT NULL,
-            timestamp TIMESTAMP {timestamp_default},
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, name)
-        )
-    ''')
-    
-    # Shared videos table (stores video files that can be shared across users)
-    execute_sql(cursor, f'''
-        CREATE TABLE IF NOT EXISTS videos (
-            id {pk_syntax},
-            filename {text_type} UNIQUE NOT NULL,
-            youtube_url {text_type},
-            title {text_type},
-            downloaded_at TIMESTAMP {timestamp_default},
-            file_size {int_type}
-        )
-    ''')
-    
-    # Library metadata table (user's video library settings - references shared videos)
-    execute_sql(cursor, f'''
-        CREATE TABLE IF NOT EXISTS library (
-            id {pk_syntax},
-            user_id {int_type} NOT NULL,
-            video_id {int_type} NOT NULL,
-            metadata {text_type} NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
-            UNIQUE(user_id, video_id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print("✅ Database initialized")
+        # Shows table (user's saved shows)
+        try:
+            execute_sql(cursor, f'''
+                CREATE TABLE IF NOT EXISTS shows (
+                    id {pk_syntax},
+                    user_id {int_type} NOT NULL,
+                    name {text_type} NOT NULL,
+                    data {text_type} NOT NULL,
+                    timestamp TIMESTAMP {timestamp_default},
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    UNIQUE(user_id, name)
+                )
+            ''')
+            print("✓ Created/verified shows table")
+        except Exception as e:
+            print(f"✗ Error creating shows table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        # Shared videos table (stores video files that can be shared across users)
+        try:
+            execute_sql(cursor, f'''
+                CREATE TABLE IF NOT EXISTS videos (
+                    id {pk_syntax},
+                    filename {text_type} UNIQUE NOT NULL,
+                    youtube_url {text_type},
+                    title {text_type},
+                    downloaded_at TIMESTAMP {timestamp_default},
+                    file_size {int_type}
+                )
+            ''')
+            print("✓ Created/verified videos table")
+        except Exception as e:
+            print(f"✗ Error creating videos table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        # Library metadata table (user's video library settings - references shared videos)
+        try:
+            execute_sql(cursor, f'''
+                CREATE TABLE IF NOT EXISTS library (
+                    id {pk_syntax},
+                    user_id {int_type} NOT NULL,
+                    video_id {int_type} NOT NULL,
+                    metadata {text_type} NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+                    UNIQUE(user_id, video_id)
+                )
+            ''')
+            print("✓ Created/verified library table")
+        except Exception as e:
+            print(f"✗ Error creating library table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        conn.commit()
+        print("✅ Database initialized - all tables created successfully")
+    except Exception as e:
+        print(f"✗ CRITICAL: Database initialization failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 
 def create_user(username, email, password=None, oauth_provider=None, oauth_id=None):
