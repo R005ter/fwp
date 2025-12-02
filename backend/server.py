@@ -16,7 +16,7 @@ from flask import Flask, request, jsonify, send_from_directory, session, redirec
 from flask_cors import CORS
 from authlib.integrations.flask_client import OAuth
 from database import (
-    init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth,
+    init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth, get_db,
     save_show, get_user_shows, delete_show,
     save_library_metadata, get_user_library, delete_library_item,
     get_video_by_youtube_url, get_video_by_filename, create_video,
@@ -357,6 +357,22 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
         return False
     
     try:
+        # Get OAuth info from local user to match user correctly on remote server
+        local_user = get_user_by_id(user_id)
+        oauth_provider = None
+        oauth_id = None
+        
+        if local_user and local_user.get('oauth_provider'):
+            oauth_provider = local_user['oauth_provider']
+            # Need to get OAuth ID from database
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT oauth_id FROM users WHERE id = ?', (user_id,))
+            user_row = cursor.fetchone()
+            conn.close()
+            if user_row and user_row.get('oauth_id'):
+                oauth_id = user_row['oauth_id']
+        
         upload_url = f"{REMOTE_SERVER_URL}/api/upload-video"
         
         # Read file in chunks for large files
@@ -365,16 +381,20 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
             data = {
                 'youtube_url': youtube_url,
                 'title': title,
-                'user_id': str(user_id),  # user_id from local session (Google OAuth)
                 'video_id': video_id
             }
             
-            # Note: We're passing user_id in form data
-            # The remote server will verify the user exists
-            # For better security, we could add API key authentication later
+            # Send OAuth info if available (preferred), otherwise fall back to user_id
+            if oauth_provider and oauth_id:
+                data['oauth_provider'] = oauth_provider
+                data['oauth_id'] = oauth_id
+                print(f"[{video_id}] Uploading {filename} ({file_path.stat().st_size / 1024 / 1024:.2f} MB) to {upload_url}...")
+                print(f"[{video_id}]   - Using OAuth matching: {oauth_provider}/{oauth_id}")
+            else:
+                data['user_id'] = str(user_id)
+                print(f"[{video_id}] Uploading {filename} ({file_path.stat().st_size / 1024 / 1024:.2f} MB) to {upload_url}...")
+                print(f"[{video_id}]   - Using user_id: {user_id} (fallback - OAuth not available)")
             
-            print(f"[{video_id}] Uploading {filename} ({file_path.stat().st_size / 1024 / 1024:.2f} MB) to {upload_url}...")
-            print(f"[{video_id}]   - user_id: {user_id} (from local Google OAuth session)")
             response = requests.post(
                 upload_url,
                 files=files,
@@ -391,6 +411,8 @@ def upload_video_to_remote(file_path, filename, youtube_url, title, user_id, vid
                 
     except Exception as e:
         print(f"[{video_id}] Upload error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -1003,10 +1025,23 @@ def upload_video():
     if 'user_id' in session:
         user_id = session.get('user_id')
         print(f"[upload] User authenticated via session: {user_id}")
-    # Otherwise get from form data (from local downloader mode)
+    # Otherwise, try OAuth matching first (preferred for cross-instance sync)
+    elif request.form.get('oauth_provider') and request.form.get('oauth_id'):
+        oauth_provider = request.form.get('oauth_provider')
+        oauth_id = request.form.get('oauth_id')
+        print(f"[upload] OAuth matching: {oauth_provider}/{oauth_id}")
+        # Look up user by OAuth ID (this ensures correct user across different databases)
+        from database import get_user_by_oauth
+        user = get_user_by_oauth(oauth_provider, oauth_id)
+        if user:
+            user_id = user['id']
+            print(f"[upload] Found user by OAuth ID: user_id={user_id}, email={user.get('email', 'unknown')}")
+        else:
+            return jsonify({"error": f"User not found with OAuth {oauth_provider}/{oauth_id}. Please log in first on this server."}), 404
+    # Fallback to user_id from form data (for backward compatibility)
     elif request.form.get('user_id'):
         user_id = int(request.form.get('user_id'))
-        print(f"[upload] User ID from form data (local downloader): {user_id}")
+        print(f"[upload] User ID from form data (fallback): {user_id}")
         # Verify user exists in database
         from database import get_user_by_id
         user = get_user_by_id(user_id)
@@ -1015,7 +1050,7 @@ def upload_video():
         print(f"[upload] Verified user exists: {user.get('email', 'unknown')}")
     
     if not user_id:
-        return jsonify({"error": "Authentication required. Please provide user_id or log in."}), 401
+        return jsonify({"error": "Authentication required. Please provide OAuth credentials, user_id, or log in."}), 401
     
     # Get video file
     if 'video' not in request.files:
