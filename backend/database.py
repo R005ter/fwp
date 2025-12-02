@@ -196,62 +196,62 @@ def init_db():
             import traceback
             traceback.print_exc()
             raise
-    
-    # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
-    # Check if columns exist and add them if missing (works for both SQLite and PostgreSQL)
-    try:
-        if USE_POSTGRES:
-            # PostgreSQL: Check if column exists using information_schema
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name = 'oauth_provider'
-            """)
-            if not cursor.fetchone():
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
-                print("✓ Added oauth_provider column to users table")
+        
+        # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
+        # Check if columns exist and add them if missing (works for both SQLite and PostgreSQL)
+        try:
+            if USE_POSTGRES:
+                # PostgreSQL: Check if column exists using information_schema
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'oauth_provider'
+                """)
+                if not cursor.fetchone():
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
+                    print("✓ Added oauth_provider column to users table")
+                
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'oauth_id'
+                """)
+                if not cursor.fetchone():
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
+                    print("✓ Added oauth_id column to users table")
             
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name = 'oauth_id'
-            """)
-            if not cursor.fetchone():
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
-                print("✓ Added oauth_id column to users table")
-            
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'users' AND column_name = 'youtube_cookies'
-            """)
-            if not cursor.fetchone():
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
-                print("✓ Added youtube_cookies column to users table")
-        else:
-            # SQLite: Try to add columns (will fail if they exist)
-            try:
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
-                print("✓ Added oauth_provider column to users table")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            
-            try:
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
-                print("✓ Added oauth_id column to users table")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            
-            try:
-                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
-                print("✓ Added youtube_cookies column to users table")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-    except Exception as e:
-        # If migration fails, log but don't crash (columns might already exist)
-        print(f"⚠ Migration note: {str(e)}")
-        pass
-    
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' AND column_name = 'youtube_cookies'
+                """)
+                if not cursor.fetchone():
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
+                    print("✓ Added youtube_cookies column to users table")
+            else:
+                # SQLite: Try to add columns (will fail if they exist)
+                try:
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
+                    print("✓ Added oauth_provider column to users table")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                
+                try:
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
+                    print("✓ Added oauth_id column to users table")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                
+                try:
+                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
+                    print("✓ Added youtube_cookies column to users table")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+        except Exception as e:
+            # If migration fails, log but don't crash (columns might already exist)
+            print(f"⚠ Migration note: {str(e)}")
+            pass
+        
         # Create index for OAuth lookups
         try:
             execute_sql(cursor, '''
