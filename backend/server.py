@@ -824,8 +824,6 @@ def run_ytdlp(video_id, url):
                             print(f"[{video_id}] ✓ Verified: Video appears in user's library")
                         else:
                             print(f"[{video_id}] ⚠ WARNING: Video not found in user's library after adding!")
-                    else:
-                        raise Exception("video_db_id is None")
                 except Exception as e:
                     error_msg = f"Error registering video: {str(e)}"
                     print(f"[{video_id}] ERROR: {error_msg}")
