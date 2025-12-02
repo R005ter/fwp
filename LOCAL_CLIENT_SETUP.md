@@ -1,42 +1,116 @@
-# Local Client Setup
+# Local Client Setup - Complete Guide
 
-The local client is a standalone application that serves the frontend locally and connects to your remote backend API.
+## Quick Start (One Command!)
 
-## Quick Start
+Just run:
+```bash
+python start_local_client.py
+```
 
-1. **Set the remote API URL** (optional, defaults to Render URL):
-   ```bash
-   export REMOTE_API_URL=https://fireworks-planner.onrender.com
-   ```
+That's it! The launcher handles everything:
+- ✅ Starts backend server locally (in downloader mode)
+- ✅ Starts frontend server
+- ✅ Configures frontend to connect to local backend
+- ✅ Opens browser automatically
+- ✅ Sets up YouTube downloads (works locally!)
+- ✅ Configures auto-upload to remote server
 
-2. **Run the local client**:
-   ```bash
-   python local_client.py
-   ```
+## What It Does
 
-3. **The browser will open automatically** at `http://localhost:8080`
+1. **Backend Server** (port 5000):
+   - Runs locally in `LOCAL_DOWNLOADER_MODE`
+   - Downloads YouTube videos locally (no IP blocking!)
+   - Automatically uploads to remote server after download
+   - Handles all API requests
 
-## How It Works
+2. **Frontend Server** (port 8080):
+   - Serves the web interface locally
+   - Automatically configured to connect to local backend
+   - Opens in your browser automatically
 
-- **Frontend**: Served locally from `frontend/` directory
-- **Backend API**: Connects to remote server (Render)
-- **YouTube Downloads**: Work locally (no IP blocking)
-- **Video Storage**: Uploads to remote server automatically
+3. **Remote Server**:
+   - Receives uploaded videos from local client
+   - Stores videos permanently
+   - Accessible from web client
 
 ## Configuration
 
-### Environment Variables
+### Environment Variables (Optional)
 
-- `REMOTE_API_URL`: Remote backend API URL (default: `https://fireworks-planner.onrender.com`)
-- `LOCAL_CLIENT_PORT`: Local server port (default: `8080`)
+- `REMOTE_API_URL`: Remote server URL (default: `https://fireworks-planner.onrender.com`)
+- `LOCAL_BACKEND_PORT`: Backend port (default: `5000`)
+- `FRONTEND_PORT`: Frontend port (default: `8080`)
 
-### Example
+### Example with Custom Settings
 
 ```bash
-REMOTE_API_URL=https://fireworks-planner.onrender.com python local_client.py
+REMOTE_API_URL=https://your-server.onrender.com python start_local_client.py
 ```
 
-## Creating an Executable
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  Local Client (Your Computer)           │
+│  ┌──────────────┐  ┌──────────────┐   │
+│  │  Frontend    │──│  Backend     │   │
+│  │  (Port 8080) │  │  (Port 5000) │   │
+│  └──────────────┘  └──────┬───────┘   │
+│                           │            │
+│                    Downloads YouTube    │
+│                    Videos Locally       │
+└───────────────────────────┼────────────┘
+                            │
+                            │ Uploads videos
+                            ▼
+┌─────────────────────────────────────────┐
+│  Remote Server (Render)                 │
+│  ┌──────────────────────────────────┐  │
+│  │  Backend API                     │  │
+│  │  - Receives video uploads        │  │
+│  │  - Stores videos permanently     │  │
+│  │  - Serves videos to web client   │  │
+│  └──────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+```
+
+## Features
+
+✅ **YouTube Downloads**: Work reliably (no Render IP blocking)  
+✅ **Auto-Upload**: Videos automatically upload to remote server  
+✅ **Web Interface**: Full-featured web UI served locally  
+✅ **No Configuration**: Just run one command  
+✅ **Auto-Browser**: Opens browser automatically  
+
+## Troubleshooting
+
+### Port Already in Use
+
+If port 5000 or 8080 is in use:
+
+```bash
+LOCAL_BACKEND_PORT=5001 FRONTEND_PORT=8081 python start_local_client.py
+```
+
+### Backend Won't Start
+
+- Make sure you're in the project root directory
+- Check that `backend/server.py` exists
+- Make sure Python dependencies are installed: `pip install -r backend/requirements.txt`
+
+### Frontend Not Loading
+
+- Check that `frontend/index.html` exists
+- Make sure backend started successfully (check console output)
+- Try accessing `http://localhost:8080` manually
+
+### Videos Not Uploading
+
+- Check that `REMOTE_API_URL` is correct
+- Verify remote server is accessible
+- Check backend logs for upload errors
+
+## Creating a Standalone Executable
 
 ### Using PyInstaller
 
@@ -47,7 +121,7 @@ REMOTE_API_URL=https://fireworks-planner.onrender.com python local_client.py
 
 2. **Create executable**:
    ```bash
-   pyinstaller --onefile --name "FireworksPlanner" --add-data "frontend;frontend" local_client.py
+   pyinstaller --onefile --name "FireworksPlanner" --add-data "frontend;frontend" --add-data "backend;backend" start_local_client.py
    ```
 
 3. **Run the executable**:
@@ -55,42 +129,21 @@ REMOTE_API_URL=https://fireworks-planner.onrender.com python local_client.py
    ./dist/FireworksPlanner
    ```
 
-### Using cx_Freeze
+Note: You'll need to include all Python dependencies and ensure the backend can import Flask, etc.
 
-1. **Install cx_Freeze**:
-   ```bash
-   pip install cx_Freeze
-   ```
+## How It Works
 
-2. **Create setup script** (see `setup_local_client.py`)
+1. **Launcher starts backend**: Runs `backend/server.py` with `LOCAL_DOWNLOADER_MODE=true`
+2. **Launcher starts frontend**: Serves `frontend/` directory on port 8080
+3. **Frontend configured**: Automatically points to `http://localhost:5000` for API calls
+4. **User downloads video**: YouTube download happens locally (works!)
+5. **Auto-upload**: Video automatically uploads to remote server
+6. **Remote storage**: Video stored permanently on Render server
 
-3. **Build**:
-   ```bash
-   python setup_local_client.py build
-   ```
+## Benefits
 
-## Features
-
-✅ **Standalone**: No need to run backend locally  
-✅ **Simple**: Just run one script  
-✅ **Auto-configured**: Automatically connects to remote API  
-✅ **YouTube Downloads**: Work reliably (no Render IP blocking)  
-✅ **Auto-upload**: Videos upload to remote server automatically  
-
-## Troubleshooting
-
-### Port Already in Use
-
-Change the port:
-```bash
-LOCAL_CLIENT_PORT=8081 python local_client.py
-```
-
-### Frontend Not Found
-
-Make sure you're running from the project root directory where `frontend/` exists.
-
-### API Connection Issues
-
-Check that `REMOTE_API_URL` is correct and the remote server is accessible.
-
+- **No IP Blocking**: YouTube downloads work locally
+- **Reliable**: No proxy issues, no timeouts
+- **Simple**: One command to run everything
+- **Flexible**: Can still access remote server for stored videos
+- **Fast**: Local downloads are faster than remote
