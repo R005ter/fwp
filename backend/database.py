@@ -39,7 +39,7 @@ def get_db():
         is_supabase = 'supabase' in (parsed.hostname or '').lower()
         
         if is_supabase:
-            # Supabase: Use connection pooling URL or add SSL parameters
+            # Supabase: Force IPv4 and SSL
             # Parse connection string to extract components
             host = parsed.hostname
             port = parsed.port or 5432
@@ -47,11 +47,16 @@ def get_db():
             user = parsed.username
             password = parsed.password
             
-            # Try connecting with explicit parameters (avoids IPv6 issues)
-            # Supabase requires SSL
+            # Try connecting with explicit parameters
+            # Force IPv4 by resolving hostname to IPv4 address
+            import socket
             try:
+                # Resolve hostname to IPv4 address to avoid IPv6 issues
+                ipv4_address = socket.gethostbyname(host)
+                print(f"✓ Resolved {host} to IPv4: {ipv4_address}")
+                
                 conn = psycopg2.connect(
-                    host=host,
+                    host=ipv4_address,  # Use IPv4 address instead of hostname
                     port=port,
                     database=database,
                     user=user,
@@ -59,14 +64,16 @@ def get_db():
                     sslmode='require',
                     cursor_factory=RealDictCursor
                 )
+            except socket.gaierror as e:
+                print(f"✗ DNS resolution failed: {str(e)}")
+                print("💡 Tip: Check your Supabase connection string")
+                raise
             except psycopg2.OperationalError as e:
-                # If direct connection fails, try with connection pooling URL
-                # Supabase connection pooling uses port 6543 (transaction mode)
-                # or pooler URL format
-                print(f"⚠ Direct connection failed: {str(e)}")
-                print("💡 Tip: For Supabase on Render, use Connection Pooling URL:")
-                print("   Settings → Database → Connection pooling → Transaction mode")
-                print("   Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:6543/postgres")
+                print(f"⚠ Connection failed: {str(e)}")
+                print("💡 Tip: For Supabase on Render, ensure you're using:")
+                print("   - Connection Pooling URL (port 6543) for transaction mode")
+                print("   - Or direct connection URL (port 5432) with proper SSL")
+                print("   - Settings → Database → Connection pooling")
                 raise
         else:
             # Regular PostgreSQL connection
