@@ -2297,8 +2297,8 @@
           )
         ),
 
-        // YouTube Download Panel
-        showYoutubeDownload && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+        // YouTube Download Panel (hidden on mobile)
+        showYoutubeDownload && !isMobile && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
           React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4' },
             React.createElement('div', { className: 'flex items-center justify-between mb-4' },
               React.createElement('h3', { className: 'text-xl font-bold text-orange-300' }, '📥 Download from YouTube'),
