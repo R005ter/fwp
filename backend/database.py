@@ -620,7 +620,9 @@ def create_video(filename, youtube_url=None, title=None, file_size=None):
                 INSERT INTO videos (filename, youtube_url, title, file_size)
                 VALUES (%s, %s, %s, %s) RETURNING id
             ''', (filename, youtube_url, title, file_size))
-            video_id = cursor.fetchone()[0]
+            # PostgreSQL with RealDictCursor returns dict-like rows
+            result = cursor.fetchone()
+            video_id = result['id'] if result else None
         else:
             execute_sql(cursor, '''
                 INSERT INTO videos (filename, youtube_url, title, file_size)
