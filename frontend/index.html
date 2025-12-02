@@ -2250,7 +2250,8 @@
             )
           ),
           React.createElement('div', { className: 'flex flex-wrap gap-2' },
-            React.createElement('button', {
+            // YouTube download button (hidden on mobile)
+            !isMobile && React.createElement('button', {
               onClick: () => setShowYoutubeDownload(!showYoutubeDownload),
               className: `px-4 py-3 md:py-2 rounded transition text-base md:text-sm ${showYoutubeDownload ? 'bg-orange-600 border-2 border-orange-400' : 'bg-orange-500 hover:bg-orange-600'}`
             }, '📥 YouTube'),
