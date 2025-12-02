@@ -71,7 +71,7 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
     
     def serve_index_with_config(self):
-        """Serve index.html configured to use local backend"""
+        """Serve index.html configured to use remote server for API, local for downloads"""
         index_file = FRONTEND_DIR / "index.html"
         if not index_file.exists():
             self.send_error(404)
@@ -81,12 +81,58 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             import re
             content = index_file.read_text(encoding='utf-8')
             
-            # Replace API_BASE to point to local backend
+            # Replace API_BASE to point to remote server
             pattern = r"const API_BASE = .*?;"
-            replacement = f"const API_BASE = 'http://localhost:{LOCAL_BACKEND_PORT}';"
+            replacement = f"const API_BASE = '{REMOTE_API_URL}';"
             
             if re.search(pattern, content, re.DOTALL):
                 content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+            
+            # Inject configuration for local YouTube downloads
+            # Add script to override /api/download to use local backend
+            local_download_config = f"""
+    <script>
+      // Override API_BASE for YouTube downloads only - use local backend
+      const REMOTE_API_BASE = '{REMOTE_API_URL}';
+      const LOCAL_BACKEND_URL = 'http://localhost:{LOCAL_BACKEND_PORT}';
+      const LOCAL_FRONTEND_URL = 'http://localhost:{FRONTEND_PORT}';
+      
+      // Store original fetch
+      const originalFetch = window.fetch;
+      
+      // Override fetch to route YouTube downloads to local backend
+      window.fetch = function(url, options) {{
+        // Route YouTube download endpoints to local backend
+        if (typeof url === 'string' && (url.includes('/api/download') || url.startsWith(REMOTE_API_BASE + '/api/download'))) {{
+          // Replace remote API URL with local backend URL
+          const localUrl = url.replace(REMOTE_API_BASE, LOCAL_BACKEND_URL);
+          console.log('[Local Client] Routing YouTube download to local backend:', localUrl);
+          return originalFetch(localUrl, options);
+        }}
+        // All other API calls go to remote server
+        return originalFetch(url, options);
+      }};
+      
+      // Override Google OAuth to redirect back to local frontend
+      window.addEventListener('DOMContentLoaded', function() {{
+        // Find Google OAuth links and update frontend_url parameter
+        setTimeout(function() {{
+          const links = document.querySelectorAll('a[href*="/api/auth/google"]');
+          links.forEach(link => {{
+            const href = link.getAttribute('href');
+            if (href && !href.includes('frontend_url=')) {{
+              const separator = href.includes('?') ? '&' : '?';
+              link.setAttribute('href', href + separator + 'frontend_url=' + encodeURIComponent(LOCAL_FRONTEND_URL));
+            }}
+          }});
+        }}, 100);
+      }});
+    </script>
+"""
+            
+            # Insert before closing </head> tag
+            if '</head>' in content:
+                content = content.replace('</head>', local_download_config + '</head>')
             
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -94,6 +140,8 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(content.encode('utf-8'))
         except Exception as e:
             print(f"Error serving index.html: {e}")
+            import traceback
+            traceback.print_exc()
             self.send_error(500)
 
 def start_backend():
@@ -173,9 +221,14 @@ def main():
     print("=" * 70)
     print("🎆 Fireworks Planner - Local Client")
     print("=" * 70)
-    print(f"Backend: http://localhost:{LOCAL_BACKEND_PORT} (local downloader mode)")
     print(f"Frontend: http://localhost:{FRONTEND_PORT}")
-    print(f"Remote API: {REMOTE_API_URL} (for uploads)")
+    print(f"Remote API: {REMOTE_API_URL} (auth, library, shows, etc.)")
+    print(f"Local Backend: http://localhost:{LOCAL_BACKEND_PORT} (YouTube downloads only)")
+    print("=" * 70)
+    print("Architecture:")
+    print(f"  • Frontend → Remote Server (for auth, library, shows)")
+    print(f"  • Frontend → Local Backend (for YouTube downloads)")
+    print(f"  • Local Backend → Remote Server (uploads videos)")
     print("=" * 70)
     
     # Check prerequisites
