@@ -352,6 +352,8 @@ def run_ytdlp(video_id, url):
                             zone_name = username.split('zone-')[-1]
                 print(f"[{video_id}]   3. Zone '{zone_name}' exists in Bright Data dashboard")
                 print(f"[{video_id}]   4. Zone is active and configured for residential proxies")
+                print(f"[{video_id}]   5. IP whitelist: Add Render's IPs to Bright Data zone allowlist")
+                print(f"[{video_id}]      (Bright Data dashboard → Zone → Security Settings → IP Allowlist)")
         
         # Now download - ensuring merged audio+video output
         # Use same client and extractor args as info fetch
