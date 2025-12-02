@@ -26,20 +26,28 @@ You can use either:
 
 ### Step 1: Get Supabase Connection String
 
+**⚠️ IMPORTANT:** For Render deployments, use **Connection Pooling** URL (not direct connection)
+
 1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
 2. Select your project
 3. Go to **Settings** → **Database**
-4. Under **Connection string**, find **"URI"** or **"Connection pooling"**
-5. Copy the connection string - it will look like:
+4. Scroll to **"Connection pooling"** section
+5. Select **"Transaction"** mode (recommended for serverless/Render)
+6. Copy the connection string - it will look like:
    ```
-   postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+   postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:6543/postgres
    ```
-   Or for connection pooling (recommended for serverless):
-   ```
-   postgres://postgres.[PROJECT-REF]:[YOUR-PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
-   ```
+   **Note:** Port `6543` is for transaction mode (not `5432`)
 
-**Important:** Replace `[YOUR-PASSWORD]` with your actual database password (found in Settings → Database → Database password)
+**Alternative:** If connection pooling doesn't work, try **Session** mode:
+```
+postgres://postgres.[PROJECT-REF]:[YOUR-PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+```
+
+**Important:** 
+- Replace `[YOUR-PASSWORD]` with your actual database password
+- Use port `6543` for transaction mode (works better with Render)
+- Direct connection (port 5432) may fail due to IPv6 issues on Render
 
 ### Step 2: Configure Render Web Service
 
