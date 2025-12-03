@@ -1,7 +1,6 @@
 """
 Database models and setup for Fireworks Planner
-Supports both SQLite (local) and PostgreSQL (shared/production)
-Uses DATABASE_URL environment variable to determine which to use
+PostgreSQL-only (requires DATABASE_URL environment variable)
 """
 
 import os
@@ -9,166 +8,137 @@ import json
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-# Check if DATABASE_URL is set (PostgreSQL) or use SQLite
+# DATABASE_URL is required
 DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    raise ValueError(
+        "DATABASE_URL environment variable is required. "
+        "Please set it to your PostgreSQL connection string. "
+        "Example: postgresql://user:password@host:port/database"
+    )
 
-if DATABASE_URL:
-    # PostgreSQL mode
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    USE_POSTGRES = True
-    print("✓ Using PostgreSQL database (shared)")
-else:
-    # SQLite mode (fallback for local development)
-    import sqlite3
-    USE_POSTGRES = False
-    DB_PATH = Path(__file__).parent / "fireworks.db"
-    print(f"✓ Using SQLite database (local): {DB_PATH}")
+print("✓ Using PostgreSQL database")
 
 
 def get_db():
     """Get database connection"""
-    if USE_POSTGRES:
-        # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
-        # Use RealDictCursor to get dict-like rows (similar to SQLite Row)
-        # Supabase requires SSL and may have IPv6 connectivity issues on Render
-        import urllib.parse
+    # Parse DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
+    # Supabase requires SSL and may have IPv6 connectivity issues on Render
+    import urllib.parse
+    
+    parsed = urllib.parse.urlparse(DATABASE_URL)
+    # Check if it's Supabase (either direct db.*.supabase.co or pooler aws-*.pooler.supabase.com)
+    hostname_lower = (parsed.hostname or '').lower()
+    is_supabase = 'supabase' in hostname_lower or 'pooler.supabase.com' in hostname_lower
+    
+    if is_supabase:
+        # Supabase: Force IPv4 connection to avoid IPv6 issues on Render
+        # Render only supports IPv4, so we need to resolve hostname to IPv4 address
+        # Parse connection string to extract components
+        host = parsed.hostname
+        port = parsed.port or 5432
+        database = parsed.path.lstrip('/')
+        user = parsed.username
+        password = parsed.password
         
-        parsed = urllib.parse.urlparse(DATABASE_URL)
-        # Check if it's Supabase (either direct db.*.supabase.co or pooler aws-*.pooler.supabase.com)
-        hostname_lower = (parsed.hostname or '').lower()
-        is_supabase = 'supabase' in hostname_lower or 'pooler.supabase.com' in hostname_lower
+        # Force IPv4 by resolving hostname to IPv4 address
+        # This is required because Render doesn't support IPv6
+        import socket
+        ipv4_address = None
         
-        if is_supabase:
-            # Supabase: Force IPv4 connection to avoid IPv6 issues on Render
-            # Render only supports IPv4, so we need to resolve hostname to IPv4 address
-            # Parse connection string to extract components
-            host = parsed.hostname
-            port = parsed.port or 5432
-            database = parsed.path.lstrip('/')
-            user = parsed.username
-            password = parsed.password
-            
-            # Force IPv4 by resolving hostname to IPv4 address
-            # This is required because Render doesn't support IPv6
-            import socket
-            ipv4_address = None
-            
-            print(f"🔍 Resolving {host} to IPv4 address (required for Render)...")
-            try:
-                # Force IPv4 resolution only (AF_INET)
-                addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-                if addr_info:
-                    ipv4_address = addr_info[0][4][0]  # Get IPv4 address
-                    print(f"✓ Resolved {host} to IPv4: {ipv4_address}")
-                else:
-                    print(f"⚠ No IPv4 address found for {host}")
-            except socket.gaierror as e:
-                print(f"✗ DNS resolution failed: {str(e)}")
-                print("   This usually means:")
-                print("   1. The hostname is incorrect")
-                print("   2. DNS is not resolving to IPv4")
-                print("   3. Network connectivity issues")
-                raise
-            
-            # Connect using IPv4 address (required for Render)
-            if not ipv4_address:
-                raise psycopg2.OperationalError(
-                    f"Could not resolve {host} to IPv4 address. "
-                    f"Render requires IPv4 connections. "
-                    f"Please check your Supabase connection string."
-                )
-            
-            try:
-                conn = psycopg2.connect(
-                    host=ipv4_address,  # Use IPv4 address instead of hostname
-                    port=port,
-                    database=database,
-                    user=user,
-                    password=password,
-                    sslmode='require',
-                    connect_timeout=10,
-                    cursor_factory=RealDictCursor
-                )
-                print(f"✓ Connected to Supabase via IPv4: {ipv4_address}:{port}")
-            except psycopg2.OperationalError as e:
-                error_msg = str(e)
-                print(f"✗ Connection failed: {error_msg}")
-                
-                # Provide helpful error messages
-                if port == 6543:
-                    print("\n💡 Port 6543 (connection pooling) may not work with Render.")
-                    print("   Use port 5432 (direct connection) instead:")
-                    print("   Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
-                else:
-                    print("\n💡 Troubleshooting tips:")
-                    print("   1. Verify your Supabase connection string in Render")
-                    print("   2. Ensure you're using port 5432 (not 6543)")
-                    print("   3. Check Supabase Dashboard → Settings → Database")
-                    print("   4. Verify your database password is correct")
-                raise
-        else:
-            # Regular PostgreSQL connection
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        print(f"🔍 Resolving {host} to IPv4 address (required for Render)...")
+        try:
+            # Force IPv4 resolution only (AF_INET)
+            addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+            if addr_info:
+                ipv4_address = addr_info[0][4][0]  # Get IPv4 address
+                print(f"✓ Resolved {host} to IPv4: {ipv4_address}")
+            else:
+                print(f"⚠ No IPv4 address found for {host}")
+        except socket.gaierror as e:
+            print(f"✗ DNS resolution failed: {str(e)}")
+            print("   This usually means:")
+            print("   1. The hostname is incorrect")
+            print("   2. DNS is not resolving to IPv4")
+            print("   3. Network connectivity issues")
+            raise
         
-        return conn
+        # Connect using IPv4 address (required for Render)
+        if not ipv4_address:
+            raise psycopg2.OperationalError(
+                f"Could not resolve {host} to IPv4 address. "
+                f"Render requires IPv4 connections. "
+                f"Please check your Supabase connection string."
+            )
+        
+        try:
+            conn = psycopg2.connect(
+                host=ipv4_address,  # Use IPv4 address instead of hostname
+                port=port,
+                database=database,
+                user=user,
+                password=password,
+                sslmode='require',
+                connect_timeout=10,
+                cursor_factory=RealDictCursor
+            )
+            print(f"✓ Connected to Supabase via IPv4: {ipv4_address}:{port}")
+        except psycopg2.OperationalError as e:
+            error_msg = str(e)
+            print(f"✗ Connection failed: {error_msg}")
+            
+            # Provide helpful error messages
+            if port == 6543:
+                print("\n💡 Port 6543 (connection pooling) may not work with Render.")
+                print("   Use port 5432 (direct connection) instead:")
+                print("   Format: postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres")
+            else:
+                print("\n💡 Troubleshooting tips:")
+                print("   1. Verify your Supabase connection string in Render")
+                print("   2. Ensure you're using port 5432 (not 6543)")
+                print("   3. Check Supabase Dashboard → Settings → Database")
+                print("   4. Verify your database password is correct")
+            raise
     else:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        return conn
+        # Regular PostgreSQL connection
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    
+    return conn
 
 
 def execute_sql(cursor, sql, params=None):
-    """Execute SQL with proper placeholder syntax for SQLite/PostgreSQL"""
-    if USE_POSTGRES:
-        # PostgreSQL uses %s placeholders
-        # Convert ? to %s if needed (but be careful not to replace in strings)
-        if '?' in sql and params:
-            # Simple replacement - assumes no ? in string literals
-            sql = sql.replace('?', '%s')
-        if params:
-            cursor.execute(sql, params)
-        else:
-            cursor.execute(sql)
+    """Execute SQL with PostgreSQL placeholder syntax (%s)"""
+    # Convert ? to %s if needed (for backward compatibility)
+    if '?' in sql and params:
+        # Simple replacement - assumes no ? in string literals
+        sql = sql.replace('?', '%s')
+    if params:
+        cursor.execute(sql, params)
     else:
-        # SQLite uses ? placeholders
-        if params:
-            cursor.execute(sql, params)
-        else:
-            cursor.execute(sql)
+        cursor.execute(sql)
 
 
 def fetch_one(cursor):
     """Fetch one row, returning dict-like object"""
-    if USE_POSTGRES:
-        return cursor.fetchone()
-    else:
-        row = cursor.fetchone()
-        return row
+    return cursor.fetchone()
 
 
 def fetch_all(cursor):
     """Fetch all rows, returning list of dict-like objects"""
-    if USE_POSTGRES:
-        return cursor.fetchall()
-    else:
-        return cursor.fetchall()
+    return cursor.fetchall()
 
 
 def get_table_info(cursor, table_name):
     """Get table column information"""
-    if USE_POSTGRES:
-        execute_sql(cursor, """
-            SELECT column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE table_name = %s
-        """, (table_name,))
-        return fetch_all(cursor)
-    else:
-        # SQLite PRAGMA doesn't use placeholders
-        cursor.execute("PRAGMA table_info({})".format(table_name))
-        return cursor.fetchall()
+    execute_sql(cursor, """
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = %s
+    """, (table_name,))
+    return fetch_all(cursor)
 
 
 def init_db():
@@ -177,60 +147,37 @@ def init_db():
         conn = get_db()
         cursor = conn.cursor()
         
-        # Determine primary key syntax
-        if USE_POSTGRES:
-            pk_syntax = "SERIAL PRIMARY KEY"
-            text_type = "TEXT"
-            int_type = "INTEGER"
-            timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
-        else:
-            pk_syntax = "INTEGER PRIMARY KEY AUTOINCREMENT"
-            text_type = "TEXT"
-            int_type = "INTEGER"
-            timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
+        # PostgreSQL syntax
+        pk_syntax = "SERIAL PRIMARY KEY"
+        text_type = "TEXT"
+        int_type = "INTEGER"
+        timestamp_default = "DEFAULT CURRENT_TIMESTAMP"
         
         # Users table - supports both local and OAuth users
         try:
-            # PostgreSQL: UNIQUE constraint on nullable columns needs special handling
-            if USE_POSTGRES:
-                # Create table first
-                execute_sql(cursor, f'''
-                    CREATE TABLE IF NOT EXISTS users (
-                        id {pk_syntax},
-                        username {text_type} UNIQUE NOT NULL,
-                        email {text_type},
-                        password_hash {text_type},
-                        oauth_provider {text_type},
-                        oauth_id {text_type},
-                        youtube_cookies {text_type},
-                        created_at TIMESTAMP {timestamp_default}
-                    )
+            # Create table first
+            execute_sql(cursor, f'''
+                CREATE TABLE IF NOT EXISTS users (
+                    id {pk_syntax},
+                    username {text_type} UNIQUE NOT NULL,
+                    email {text_type},
+                    password_hash {text_type},
+                    oauth_provider {text_type},
+                    oauth_id {text_type},
+                    youtube_cookies {text_type},
+                    created_at TIMESTAMP {timestamp_default}
+                )
+            ''')
+            # Add unique constraint separately (PostgreSQL allows NULL in unique constraints)
+            try:
+                execute_sql(cursor, '''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth 
+                    ON users(oauth_provider, oauth_id) 
+                    WHERE oauth_provider IS NOT NULL AND oauth_id IS NOT NULL
                 ''')
-                # Add unique constraint separately (PostgreSQL allows NULL in unique constraints)
-                try:
-                    execute_sql(cursor, '''
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth 
-                        ON users(oauth_provider, oauth_id) 
-                        WHERE oauth_provider IS NOT NULL AND oauth_id IS NOT NULL
-                    ''')
-                except Exception as idx_error:
-                    # Index might already exist or constraint might be different
-                    print(f"⚠ Note on OAuth unique constraint: {str(idx_error)}")
-            else:
-                # SQLite: Can use inline UNIQUE constraint
-                execute_sql(cursor, f'''
-                    CREATE TABLE IF NOT EXISTS users (
-                        id {pk_syntax},
-                        username {text_type} UNIQUE NOT NULL,
-                        email {text_type},
-                        password_hash {text_type},
-                        oauth_provider {text_type},
-                        oauth_id {text_type},
-                        youtube_cookies {text_type},
-                        created_at TIMESTAMP {timestamp_default},
-                        UNIQUE(oauth_provider, oauth_id)
-                    )
-                ''')
+            except Exception as idx_error:
+                # Index might already exist or constraint might be different
+                print(f"⚠ Note on OAuth unique constraint: {str(idx_error)}")
             print("✓ Created/verified users table")
         except Exception as e:
             print(f"✗ Error creating users table: {str(e)}")
@@ -239,55 +186,35 @@ def init_db():
             raise
         
         # Migrate existing users table if needed (add OAuth columns and youtube_cookies)
-        # Check if columns exist and add them if missing (works for both SQLite and PostgreSQL)
+        # Check if columns exist and add them if missing
         try:
-            if USE_POSTGRES:
-                # PostgreSQL: Check if column exists using information_schema
-                execute_sql(cursor, """
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = %s AND column_name = %s
-                """, ('users', 'oauth_provider'))
-                if not fetch_one(cursor):
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
-                    print("✓ Added oauth_provider column to users table")
-                
-                execute_sql(cursor, """
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = %s AND column_name = %s
-                """, ('users', 'oauth_id'))
-                if not fetch_one(cursor):
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
-                    print("✓ Added oauth_id column to users table")
+            # PostgreSQL: Check if column exists using information_schema
+            execute_sql(cursor, """
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = %s AND column_name = %s
+            """, ('users', 'oauth_provider'))
+            if not fetch_one(cursor):
+                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
+                print("✓ Added oauth_provider column to users table")
             
-                execute_sql(cursor, """
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = %s AND column_name = %s
-                """, ('users', 'youtube_cookies'))
-                if not fetch_one(cursor):
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
-                    print("✓ Added youtube_cookies column to users table")
-            else:
-                # SQLite: Try to add columns (will fail if they exist)
-                try:
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_provider TEXT')
-                    print("✓ Added oauth_provider column to users table")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-                
-                try:
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
-                    print("✓ Added oauth_id column to users table")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-                
-                try:
-                    execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
-                    print("✓ Added youtube_cookies column to users table")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
+            execute_sql(cursor, """
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = %s AND column_name = %s
+            """, ('users', 'oauth_id'))
+            if not fetch_one(cursor):
+                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN oauth_id TEXT')
+                print("✓ Added oauth_id column to users table")
+        
+            execute_sql(cursor, """
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = %s AND column_name = %s
+            """, ('users', 'youtube_cookies'))
+            if not fetch_one(cursor):
+                execute_sql(cursor, 'ALTER TABLE users ADD COLUMN youtube_cookies TEXT')
+                print("✓ Added youtube_cookies column to users table")
         except Exception as e:
             # If migration fails, log but don't crash (columns might already exist)
             print(f"⚠ Migration note: {str(e)}")
@@ -391,7 +318,7 @@ def create_user(username, email, password=None, oauth_provider=None, oauth_id=No
         base_username = username
         counter = 1
         while True:
-            execute_sql(cursor, 'SELECT id FROM users WHERE username = ?', (username,))
+            execute_sql(cursor, 'SELECT id FROM users WHERE username = %s', (username,))
             if not fetch_one(cursor):
                 break
             username = f"{base_username}{counter}"
@@ -400,27 +327,20 @@ def create_user(username, email, password=None, oauth_provider=None, oauth_id=No
         # Check if OAuth ID already exists
         if oauth_provider and oauth_id:
             execute_sql(cursor,
-                'SELECT id FROM users WHERE oauth_provider = ? AND oauth_id = ?',
+                'SELECT id FROM users WHERE oauth_provider = %s AND oauth_id = %s',
                 (oauth_provider, oauth_id)
             )
             if fetch_one(cursor):
                 conn.close()
                 return None  # OAuth ID already exists
         
-        if USE_POSTGRES:
-            execute_sql(cursor,
-                'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
-                (username, email, password_hash, oauth_provider, oauth_id)
-            )
-            # PostgreSQL with RealDictCursor returns dict-like rows
-            result = cursor.fetchone()
-            user_id = result['id'] if result else None
-        else:
-            execute_sql(cursor,
-                'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (?, ?, ?, ?, ?)',
-                (username, email, password_hash, oauth_provider, oauth_id)
-            )
-            user_id = cursor.lastrowid
+        execute_sql(cursor,
+            'INSERT INTO users (username, email, password_hash, oauth_provider, oauth_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+            (username, email, password_hash, oauth_provider, oauth_id)
+        )
+        # PostgreSQL with RealDictCursor returns dict-like rows
+        result = cursor.fetchone()
+        user_id = result['id'] if result else None
         conn.commit()
         return {"id": user_id, "username": username, "email": email, "oauth_provider": oauth_provider}
     except Exception as e:
@@ -437,7 +357,7 @@ def verify_user(username, password):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT * FROM users WHERE username = ?', (username,))
+    execute_sql(cursor, 'SELECT * FROM users WHERE username = %s', (username,))
     user = fetch_one(cursor)
     conn.close()
     
@@ -455,7 +375,7 @@ def get_user_by_id(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT * FROM users WHERE id = ?', (user_id,))
+    execute_sql(cursor, 'SELECT * FROM users WHERE id = %s', (user_id,))
     user = fetch_one(cursor)
     conn.close()
     
@@ -480,7 +400,7 @@ def get_user_by_oauth(provider, oauth_id):
     cursor = conn.cursor()
     
     execute_sql(cursor,
-        'SELECT * FROM users WHERE oauth_provider = ? AND oauth_id = ?',
+        'SELECT * FROM users WHERE oauth_provider = %s AND oauth_id = %s',
         (provider, oauth_id)
     )
     user = fetch_one(cursor)
@@ -507,17 +427,11 @@ def save_show(user_id, show_name, show_data):
     cursor = conn.cursor()
     
     data_json = json.dumps(show_data)
-    if USE_POSTGRES:
-        execute_sql(cursor, '''
-            INSERT INTO shows (user_id, name, data, timestamp)
-            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id, name) DO UPDATE SET data = %s, timestamp = CURRENT_TIMESTAMP
-        ''', (user_id, show_name, data_json, data_json))
-    else:
-        execute_sql(cursor, '''
-            INSERT OR REPLACE INTO shows (user_id, name, data, timestamp)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (user_id, show_name, data_json))
+    execute_sql(cursor, '''
+        INSERT INTO shows (user_id, name, data, timestamp)
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, name) DO UPDATE SET data = %s, timestamp = CURRENT_TIMESTAMP
+    ''', (user_id, show_name, data_json, data_json))
     
     conn.commit()
     conn.close()
@@ -529,7 +443,7 @@ def get_user_shows(user_id):
     cursor = conn.cursor()
     
     execute_sql(cursor,
-        'SELECT name, data, timestamp FROM shows WHERE user_id = ? ORDER BY timestamp DESC',
+        'SELECT name, data, timestamp FROM shows WHERE user_id = %s ORDER BY timestamp DESC',
         (user_id,)
     )
     rows = fetch_all(cursor)
@@ -551,7 +465,7 @@ def delete_show(user_id, show_name):
     cursor = conn.cursor()
     
     execute_sql(cursor,
-        'DELETE FROM shows WHERE user_id = ? AND name = ?',
+        'DELETE FROM shows WHERE user_id = %s AND name = %s',
         (user_id, show_name)
     )
     conn.commit()
@@ -565,7 +479,7 @@ def get_video_by_youtube_url(youtube_url):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT * FROM videos WHERE youtube_url = ?', (youtube_url,))
+    execute_sql(cursor, 'SELECT * FROM videos WHERE youtube_url = %s', (youtube_url,))
     video = fetch_one(cursor)
     conn.close()
     
@@ -590,7 +504,7 @@ def get_video_by_filename(filename):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT * FROM videos WHERE filename = ?', (filename,))
+    execute_sql(cursor, 'SELECT * FROM videos WHERE filename = %s', (filename,))
     video = fetch_one(cursor)
     conn.close()
     
@@ -616,26 +530,19 @@ def create_video(filename, youtube_url=None, title=None, file_size=None):
     cursor = conn.cursor()
     
     try:
-        if USE_POSTGRES:
-            execute_sql(cursor, '''
-                INSERT INTO videos (filename, youtube_url, title, file_size)
-                VALUES (%s, %s, %s, %s) RETURNING id
-            ''', (filename, youtube_url, title, file_size))
-            # PostgreSQL with RealDictCursor returns dict-like rows
-            result = cursor.fetchone()
-            video_id = result['id'] if result else None
-        else:
-            execute_sql(cursor, '''
-                INSERT INTO videos (filename, youtube_url, title, file_size)
-                VALUES (?, ?, ?, ?)
-            ''', (filename, youtube_url, title, file_size))
-            video_id = cursor.lastrowid
+        execute_sql(cursor, '''
+            INSERT INTO videos (filename, youtube_url, title, file_size)
+            VALUES (%s, %s, %s, %s) RETURNING id
+        ''', (filename, youtube_url, title, file_size))
+        # PostgreSQL with RealDictCursor returns dict-like rows
+        result = cursor.fetchone()
+        video_id = result['id'] if result else None
         conn.commit()
         conn.close()
         return video_id
     except Exception as e:
         # Video already exists
-        execute_sql(cursor, 'SELECT id FROM videos WHERE filename = ?', (filename,))
+        execute_sql(cursor, 'SELECT id FROM videos WHERE filename = %s', (filename,))
         video = fetch_one(cursor)
         conn.close()
         return video['id'] if video else None
@@ -647,17 +554,11 @@ def add_video_to_library(user_id, video_id, metadata):
     cursor = conn.cursor()
     
     metadata_json = json.dumps(metadata)
-    if USE_POSTGRES:
-        execute_sql(cursor, '''
-            INSERT INTO library (user_id, video_id, metadata)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (user_id, video_id) DO UPDATE SET metadata = %s
-        ''', (user_id, video_id, metadata_json, metadata_json))
-    else:
-        execute_sql(cursor, '''
-            INSERT OR REPLACE INTO library (user_id, video_id, metadata)
-            VALUES (?, ?, ?)
-        ''', (user_id, video_id, metadata_json))
+    execute_sql(cursor, '''
+        INSERT INTO library (user_id, video_id, metadata)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, video_id) DO UPDATE SET metadata = %s
+    ''', (user_id, video_id, metadata_json, metadata_json))
     
     conn.commit()
     conn.close()
@@ -697,7 +598,7 @@ def get_user_library(user_id):
         SELECT v.filename, l.metadata
         FROM library l
         JOIN videos v ON l.video_id = v.id
-        WHERE l.user_id = ?
+        WHERE l.user_id = %s
     ''', (user_id,))
     rows = fetch_all(cursor)
     conn.close()
@@ -713,7 +614,7 @@ def get_video_reference_count(video_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT COUNT(*) as count FROM library WHERE video_id = ?', (video_id,))
+    execute_sql(cursor, 'SELECT COUNT(*) as count FROM library WHERE video_id = %s', (video_id,))
     result = fetch_one(cursor)
     conn.close()
     
@@ -726,7 +627,7 @@ def remove_video_from_library(user_id, filename):
     cursor = conn.cursor()
     
     # Find video by filename
-    execute_sql(cursor, 'SELECT id FROM videos WHERE filename = ?', (filename,))
+    execute_sql(cursor, 'SELECT id FROM videos WHERE filename = %s', (filename,))
     video = fetch_one(cursor)
     
     if not video:
@@ -737,7 +638,7 @@ def remove_video_from_library(user_id, filename):
     
     # Remove from user's library
     execute_sql(cursor,
-        'DELETE FROM library WHERE user_id = ? AND video_id = ?',
+        'DELETE FROM library WHERE user_id = %s AND video_id = %s',
         (user_id, video_id)
     )
     deleted = cursor.rowcount > 0
@@ -763,7 +664,7 @@ def cleanup_orphaned_videos():
     
     deleted_files = []
     for video in orphaned:
-        execute_sql(cursor, 'DELETE FROM videos WHERE id = ?', (video['id'],))
+        execute_sql(cursor, 'DELETE FROM videos WHERE id = %s', (video['id'],))
         deleted_files.append(video['filename'])
     
     conn.commit()
@@ -782,7 +683,7 @@ def get_user_youtube_cookies(user_id):
     conn = get_db()
     cursor = conn.cursor()
     
-    execute_sql(cursor, 'SELECT youtube_cookies FROM users WHERE id = ?', (user_id,))
+    execute_sql(cursor, 'SELECT youtube_cookies FROM users WHERE id = %s', (user_id,))
     row = fetch_one(cursor)
     conn.close()
     
@@ -800,7 +701,7 @@ def set_user_youtube_cookies(user_id, cookies_data):
     cursor = conn.cursor()
     
     execute_sql(cursor,
-        'UPDATE users SET youtube_cookies = ? WHERE id = ?',
+        'UPDATE users SET youtube_cookies = %s WHERE id = %s',
         (cookies_data, user_id)
     )
     conn.commit()

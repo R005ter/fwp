@@ -38,6 +38,23 @@ def build_executable():
         print(f"ERROR: Backend directory not found: {backend_dir}")
         return False
     
+    # Check critical dependencies are installed
+    print("\nChecking dependencies...")
+    critical_deps = ['psycopg2', 'boto3', 'flask', 'yt_dlp']
+    missing_deps = []
+    for dep in critical_deps:
+        try:
+            __import__(dep.replace('-', '_'))
+            print(f"  ✓ {dep}")
+        except ImportError:
+            print(f"  ✗ {dep} - MISSING")
+            missing_deps.append(dep)
+    
+    if missing_deps:
+        print(f"\nERROR: Missing dependencies: {', '.join(missing_deps)}")
+        print("Install them with: pip install -r backend/requirements.txt")
+        return False
+    
     # Build PyInstaller command
     cmd = [
         "pyinstaller",
@@ -49,7 +66,7 @@ def build_executable():
         "--hidden-import", "flask",
         "--hidden-import", "flask_cors",
         "--hidden-import", "authlib",
-        "--hidden-import", "database",
+        "--hidden-import", "backend.database",
         "--hidden-import", "dotenv",
         "--hidden-import", "requests",
         "--hidden-import", "subprocess",
@@ -58,9 +75,22 @@ def build_executable():
         "--hidden-import", "socketserver",
         "--hidden-import", "webbrowser",
         "--hidden-import", "urllib",
+        "--hidden-import", "psycopg2",
+        "--hidden-import", "psycopg2.extras",
+        "--hidden-import", "psycopg2._psycopg",
+        "--hidden-import", "boto3",
+        "--hidden-import", "botocore",
+        "--hidden-import", "yt_dlp",
+        "--hidden-import", "werkzeug",
+        "--hidden-import", "werkzeug.security",
         "--collect-all", "flask",
         "--collect-all", "flask_cors",
         "--collect-all", "authlib",
+        "--collect-all", "psycopg2",
+        "--collect-all", "boto3",
+        "--collect-all", "botocore",
+        "--collect-all", "yt_dlp",
+        "--collect-all", "werkzeug",
         "start_local_client.py"
     ]
     

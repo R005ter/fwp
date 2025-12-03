@@ -81,12 +81,17 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             import re
             content = index_file.read_text(encoding='utf-8')
             
-            # Replace API_BASE to point to remote server
-            pattern = r"const API_BASE = .*?;"
-            replacement = f"const API_BASE = '{REMOTE_API_URL}';"
+            # Replace API_BASE definition FIRST - must happen before other scripts
+            # Match the entire API_BASE assignment block (including conditional)
+            # Pattern matches: const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin;
+            pattern = r"const API_BASE = window\.location\.hostname === ['\"]localhost['\"][\s\S]*?window\.location\.origin;"
+            replacement = f"const API_BASE = '{REMOTE_API_URL}'; // Local client: always use remote server for OAuth and API"
             
-            if re.search(pattern, content, re.DOTALL):
-                content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
+                print(f"[Local Client] Replaced API_BASE with remote server URL: {REMOTE_API_URL}")
+            else:
+                print("[Local Client] WARNING: Could not find API_BASE definition to replace")
             
             # Inject configuration for local YouTube downloads and OAuth
             local_download_config = f"""
@@ -97,7 +102,7 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
       const LOCAL_FRONTEND_URL = 'http://localhost:{FRONTEND_PORT}';
       
       console.log('[Local Client] Configured:');
-      console.log('  Remote API:', REMOTE_API_BASE);
+      console.log('  Remote API (API_BASE):', REMOTE_API_BASE);
       console.log('  Local Backend:', LOCAL_BACKEND_URL);
       console.log('  Local Frontend:', LOCAL_FRONTEND_URL);
       
@@ -148,13 +153,17 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
         // This will be http://localhost:8080 when running locally
         console.log('[Local Client] Frontend origin:', window.location.origin);
         console.log('[Local Client] OAuth will redirect back to:', window.location.origin);
+        console.log('[Local Client] API_BASE is:', typeof API_BASE !== 'undefined' ? API_BASE : 'undefined');
       }});
     </script>
 """
             
-            # Insert before closing </head> tag
+            # Insert configuration script EARLY in <head> (before main script)
             if '</head>' in content:
                 content = content.replace('</head>', local_download_config + '</head>')
+            elif '<body>' in content:
+                # Fallback: insert right before body if no </head> tag
+                content = content.replace('<body>', local_download_config + '<body>')
             
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')

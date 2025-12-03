@@ -18,10 +18,10 @@ R2_SECRET_ACCESS_KEY=220b18f80db5728df3b5360d72092cbd2eea57be26004dff8c989c1fa97
 R2_BUCKET_NAME=fwp-videos
 R2_ENDPOINT_URL=https://ee931125693573fbbcdd6a3ed03a084e.r2.cloudflarestorage.com
 
-# PostgreSQL Database (optional - for shared database between local and Render)
-# If not set, uses SQLite (local file) instead
-# Get from Render Dashboard → PostgreSQL → External Database URL
-# DATABASE_URL=postgresql://user:password@hostname:5432/dbname
+# PostgreSQL Database (REQUIRED)
+# Get from Supabase Dashboard → Settings → Database → Connection String
+# Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+DATABASE_URL=postgresql://postgres.ttdrydqzszdkkzqbhccf:your-password@aws-1-us-east-1.pooler.supabase.com:5432/postgres
 ```
 
 3. The `start-servers.ps1` script will automatically load these when you run `START.bat`
@@ -43,8 +43,8 @@ $env:R2_SECRET_ACCESS_KEY="220b18f80db5728df3b5360d72092cbd2eea57be26004dff8c989
 $env:R2_BUCKET_NAME="fwp-videos"
 $env:R2_ENDPOINT_URL="https://ee931125693573fbbcdd6a3ed03a084e.r2.cloudflarestorage.com"
 
-# PostgreSQL Database (optional - for shared database)
-# $env:DATABASE_URL="postgresql://user:password@hostname:5432/dbname"
+# PostgreSQL Database (REQUIRED)
+$env:DATABASE_URL="postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
 ```
 
 Then start the server.
@@ -63,10 +63,11 @@ See `GOOGLE_OAUTH_SETUP.md` for detailed instructions.
 
 ## Database Configuration
 
-**By default:** Uses SQLite (local file `backend/fireworks.db`)
+**REQUIRED:** PostgreSQL database connection string must be set via `DATABASE_URL` environment variable.
 
-**For shared database:** Set `DATABASE_URL` to use PostgreSQL:
-- Local and Render will share the same database
-- Shows and library data will sync automatically
+- Local and Render share the same database
+- Shows and library data sync automatically
 - See `POSTGRESQL_SETUP.md` for detailed setup instructions
+
+**Note:** SQLite is no longer supported. You must use PostgreSQL (Supabase recommended).
 
