@@ -110,13 +110,25 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
       let authToken = null;
       
       // Check URL for auth token (from OAuth redirect)
+      // Token can be in query string (?token=...) or hash (#/dashboard?token=...)
+      let tokenFromUrl = null;
+      
+      // Check query string first
       const urlParams = new URLSearchParams(window.location.search);
-      const tokenFromUrl = urlParams.get('token');
+      tokenFromUrl = urlParams.get('token');
+      
+      // If not in query string, check hash
+      if (!tokenFromUrl && window.location.hash) {{
+        const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+        tokenFromUrl = hashParams.get('token');
+      }}
+      
       if (tokenFromUrl) {{
         authToken = tokenFromUrl;
         localStorage.setItem('auth_token', tokenFromUrl);
-        // Remove token from URL
-        window.history.replaceState({{}}, '', window.location.pathname + window.location.hash);
+        // Remove token from URL (clean up hash)
+        const cleanHash = window.location.hash.split('?')[0] || '#/dashboard';
+        window.history.replaceState({{}}, '', window.location.pathname + cleanHash);
         console.log('[Local Client] Auth token saved from OAuth redirect');
       }} else {{
         // Try to get token from localStorage

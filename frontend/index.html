@@ -2051,13 +2051,29 @@
 
       const handleVideoLoaded = (id, duration) => {
         setVideos(prev => {
-          const updated = prev.map(v => v.id === id ? { ...v, duration } : v);
-          const maxEnd = Math.max(...updated.map(v => {
-            const trimStart = v.trimStart || 0;
-            const trimEnd = v.trimEnd || 0;
-            return v.offset + (v.duration - trimStart - trimEnd);
-          }));
-          if (maxEnd > totalDuration) setTotalDuration(maxEnd + 10);
+          const updated = prev.map(v => {
+            if (v.id === id) {
+              // Save duration to library metadata if we have filename
+              if (v.filename && duration && duration > 0) {
+                // Save to localStorage (library sync will happen elsewhere)
+                try {
+                  const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                  if (libraryData[v.filename]) {
+                    libraryData[v.filename] = {
+                      ...libraryData[v.filename],
+                      duration
+                    };
+                    localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                  }
+                } catch (err) {
+                  console.warn('Failed to save duration to localStorage:', err);
+                }
+              }
+              return { ...v, duration };
+            }
+            return v;
+          });
+          // totalDuration will be recalculated automatically by useEffect when videos change
           return updated;
         });
       };
@@ -2186,12 +2202,39 @@
         };
       }, []);
 
-      // Compute filtered videos (only active ones) before rendering
-      let filteredVideos = [];
-      let activeVideos = [];
-      
-      try {
-        filteredVideos = videos.length === 0 ? [] : videos.filter(video => {
+      // Recalculate totalDuration whenever videos change
+      React.useEffect(() => {
+        if (videos.length === 0) {
+          setTotalDuration(60);
+          return;
+        }
+        
+        // Filter out videos without valid durations
+        const videosWithDuration = videos.filter(v => v.duration && v.duration > 0);
+        
+        if (videosWithDuration.length === 0) {
+          setTotalDuration(60);
+          return;
+        }
+        
+        const maxEnd = Math.max(...videosWithDuration.map(v => {
+          const trimStart = v.trimStart || 0;
+          const trimEnd = v.trimEnd || 0;
+          const trimmedDuration = v.duration - trimStart - trimEnd;
+          return (v.offset || 0) + trimmedDuration;
+        }));
+        
+        // Set totalDuration to max end time + 10 seconds buffer, minimum 60
+        if (maxEnd > 0 && isFinite(maxEnd)) {
+          setTotalDuration(Math.max(60, maxEnd + 10));
+        }
+      }, [videos]);
+
+      // Compute filtered videos (only active ones currently playing) - memoized for performance
+      const filteredVideos = React.useMemo(() => {
+        if (videos.length === 0) return [];
+        
+        return videos.filter(video => {
           try {
             // If duration is 0 or not set, show the video (it's still loading)
             if (!video.duration || video.duration === 0) {
@@ -2200,7 +2243,7 @@
             
             const trimStart = video.trimStart || 0;
             const trimEnd = video.trimEnd || 0;
-            const videoTime = (masterTime || 0) - (video.offset || 0);
+            const videoTime = masterTime - (video.offset || 0);
             const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
             
             // Show if currently playing (within trimmed duration)
@@ -2210,25 +2253,23 @@
             return false;
           }
         });
+      }, [videos, masterTime]);
 
-        // Count active videos for header
-        activeVideos = videos.filter(video => {
+      // Count active videos for header - memoized
+      const activeVideos = React.useMemo(() => {
+        return videos.filter(video => {
           try {
             if (!video.duration || video.duration === 0) return false;
             const trimStart = video.trimStart || 0;
             const trimEnd = video.trimEnd || 0;
-            const videoTime = (masterTime || 0) - (video.offset || 0);
+            const videoTime = masterTime - (video.offset || 0);
             const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
             return videoTime >= 0 && videoTime <= trimmedDuration;
           } catch (err) {
             return false;
           }
         });
-      } catch (err) {
-        console.error('Error computing filtered videos:', err);
-        filteredVideos = videos || [];
-        activeVideos = [];
-      }
+      }, [videos, masterTime]);
 
       try {
         return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col' },
@@ -2461,25 +2502,45 @@
                   React.createElement('p', { className: 'text-sm' }, 'Use "Add from Library" to add videos to your timeline')
                 )
               )
-            : filteredVideos.map(video => {
+            : videos.map(video => {
                 const trimStart = video.trimStart || 0;
                 const trimEnd = video.trimEnd || 0;
-                const videoTime = masterTime - video.offset;
+                const videoTime = masterTime - (video.offset || 0);
                 const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
                 const isActive = video.duration && video.duration > 0 && videoTime >= 0 && videoTime <= trimmedDuration;
+                const isInTimeframe = videoTime >= 0 && videoTime <= trimmedDuration;
+                
+                // Only show videos that are in the current timeframe (filtered)
+                // But render ALL videos so refs are set for sync loop
+                const shouldShow = isInTimeframe;
+                
+                // Debug: log if video doesn't have URL
+                if (!video.url) {
+                  console.warn(`Video ${video.name || video.id} missing URL:`, video);
+                }
                 
                 return React.createElement('div', {
                   key: video.id,
                   className: 'relative bg-black rounded-lg overflow-hidden border-2 transition-colors flex items-center justify-center',
                   style: { 
                     borderColor: isActive ? video.color : '#374151',
-                    aspectRatio: '16/9'
+                    aspectRatio: '16/9',
+                    // Always render videos (for refs) but hide inactive ones
+                    // Use pointer-events: none on hidden videos to prevent interaction issues
+                    visibility: shouldShow ? 'visible' : 'hidden',
+                    opacity: shouldShow ? 1 : 0,
+                    pointerEvents: shouldShow ? 'auto' : 'none',
+                    position: shouldShow ? 'relative' : 'absolute',
+                    // Position hidden videos off-screen but still render them
+                    ...(shouldShow ? {} : { left: '-9999px', top: '-9999px', zIndex: -1 })
                   }
                 },
                   video.url 
                     ? React.createElement('video', {
                         ref: el => {
-                          if (el) videoRefs.current[video.id] = el;
+                          if (el) {
+                            videoRefs.current[video.id] = el;
+                          }
                         },
                         src: video.url,
                         className: 'max-w-full max-h-full object-cover',
@@ -2487,19 +2548,59 @@
                           clipPath: `inset(${video.cropY || 0}% ${100 - (video.cropX || 0) - (video.cropWidth || 100)}% ${100 - (video.cropY || 0) - (video.cropHeight || 100)}% ${video.cropX || 0}%)`
                         },
                         onLoadedMetadata: (e) => {
-                          if (e.target.duration) {
-                            handleVideoLoaded(video.id, e.target.duration);
+                          try {
+                            const duration = e.target.duration;
+                            if (duration && duration > 0) {
+                              console.log(`[Video Metadata] Loaded duration ${duration.toFixed(2)}s for video ${video.id} (${video.name})`);
+                              handleVideoLoaded(video.id, duration);
+                              
+                              // Seek to start position to show first frame (like library editor does)
+                              const trimStart = video.trimStart || 0;
+                              // Just show the start frame initially - the sync loop will handle positioning
+                              e.target.currentTime = trimStart;
+                            } else {
+                              console.warn(`[Video Metadata] Invalid duration ${duration} for video ${video.id} (${video.name})`);
+                            }
+                          } catch (err) {
+                            console.error(`[Video Metadata] Error in onLoadedMetadata for ${video.id}:`, err);
                           }
                         },
                         onError: (e) => {
                           console.error(`Failed to load video ${video.name}:`, video.url, e);
                         },
+                        onCanPlay: () => {
+                          console.log(`[Video] ${video.id} can play:`, video.url);
+                        },
+                        onPlay: () => {
+                          console.log(`[Video] ${video.id} started playing`);
+                        },
+                        onPause: () => {
+                          console.log(`[Video] ${video.id} paused`);
+                        },
+                        onWaiting: () => {
+                          console.log(`[Video] ${video.id} waiting for data`);
+                        },
+                        onLoadedData: () => {
+                          try {
+                            const videoEl = videoRefs.current[video.id];
+                            console.log(`[Video] ${video.id} loaded data, readyState:`, videoEl?.readyState);
+                            // Ensure first frame is shown - just set to trimStart, sync loop will handle positioning
+                            if (videoEl && videoEl.readyState >= 2) {
+                              const trimStart = video.trimStart || 0;
+                              videoEl.currentTime = trimStart;
+                            }
+                          } catch (err) {
+                            console.error(`[Video] Error in onLoadedData for ${video.id}:`, err);
+                          }
+                        },
                         crossOrigin: 'anonymous',
-                        preload: 'metadata'
+                        preload: 'auto',
+                        playsInline: true,
+                        muted: false // Don't mute - we want audio
                       })
                     : React.createElement('div', { 
                         className: 'flex items-center justify-center h-full text-gray-500 text-sm' 
-                      }, 'No video URL'),
+                      }, `No video URL (filename: ${video.filename || 'unknown'})`),
                   React.createElement('div', {
                     className: 'absolute top-2 left-2 px-2 py-1 rounded text-sm font-medium max-w-[60%] truncate',
                     style: { backgroundColor: video.color }
@@ -2646,14 +2747,35 @@
             videos.map((video, index) => {
               const trimStart = video.trimStart || 0;
               const trimEnd = video.trimEnd || 0;
-              const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+              // Only calculate if video has valid duration
+              const trimmedDuration = (video.duration && video.duration > 0) 
+                ? Math.max(0, video.duration - trimStart - trimEnd)
+                : 0;
+              
+              // Skip rendering if no valid duration
+              if (!video.duration || video.duration <= 0) {
+                return React.createElement('div', {
+                  key: video.id,
+                  className: 'absolute h-10 md:h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg no-select touch-none opacity-50',
+                  style: {
+                    top: index * 50 + 10,
+                    left: `${((video.offset || 0) / totalDuration) * 100 * zoom}%`,
+                    width: '60px',
+                    backgroundColor: video.color || '#666',
+                    minWidth: '60px',
+                    touchAction: 'none'
+                  },
+                  onMouseDown: (e) => handleTimelineMouseDown(e, video.id),
+                  onTouchStart: (e) => handleTimelineMouseDown(e, video.id)
+                }, `${video.name} (loading...)`);
+              }
               
               return React.createElement('div', {
                 key: video.id,
                 className: 'absolute h-10 md:h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg no-select touch-none',
                 style: {
                   top: index * 50 + 10,
-                  left: `${(video.offset / totalDuration) * 100 * zoom}%`,
+                  left: `${((video.offset || 0) / totalDuration) * 100 * zoom}%`,
                   width: `${(trimmedDuration / totalDuration) * 100 * zoom}%`,
                   backgroundColor: video.color,
                   minWidth: '60px',
@@ -2730,6 +2852,7 @@
       const timelineRef = React.useRef(null);
       const animationRef = React.useRef(null);
       const lastTimeRef = React.useRef(Date.now());
+      const isPlayingRef = React.useRef(false);
 
       const showToast = (message, type = 'info') => {
         const id = Date.now();
@@ -2923,7 +3046,7 @@
                     url: `${API_BASE}/videos/${video.filename}`,
                     sourceUrl: savedData.sourceUrl || null,
                     size: video.size,
-                    duration: savedData.duration || null,
+                    duration: savedData.duration || video.duration || null, // Try savedData first, then video object, then null
                     defaultTrimStart: savedData.defaultTrimStart || 0,
                     defaultTrimEnd: savedData.defaultTrimEnd || 0,
                     defaultCropX: savedData.defaultCropX || 0,
@@ -3032,13 +3155,25 @@
           }
         });
 
-        // Restore video URLs from API_BASE if needed
+        // Restore video URLs - match with downloadedVideos to get correct URLs
         const restoredVideos = session.videos
           .filter(v => v.filename || v.url)
-          .map(v => ({
-            ...v,
-            url: v.url || (v.filename ? `${API_BASE}/videos/${v.filename}` : null)
-          }))
+          .map(v => {
+            // Try to find video in downloadedVideos map to get correct URL and duration
+            const libraryVideo = downloadedVideos.get(v.filename);
+            const videoUrl = v.url || (libraryVideo ? libraryVideo.url : null) || (v.filename ? `${API_BASE}/videos/${v.filename}` : null);
+            
+            // Use duration from saved show, or fall back to library video duration, or keep existing
+            const duration = v.duration || (libraryVideo ? libraryVideo.duration : null) || v.duration || 0;
+            
+            return {
+              ...v,
+              url: videoUrl,
+              duration: duration, // Ensure duration is preserved/restored
+              // Ensure we have an id
+              id: v.id || `${v.filename || 'video'}-${Date.now()}-${Math.random()}`
+            };
+          })
           .filter(v => v.url);
 
         setVideos(restoredVideos);
@@ -3220,6 +3355,9 @@
       };
 
       const handleAddFromLibrary = (videoData) => {
+        // Use duration from library, but if it's null/0/undefined, we'll load it from video metadata
+        const initialDuration = (videoData.duration && videoData.duration > 0) ? videoData.duration : 0;
+        
         const newInstance = {
           id: `${videoData.filename}-${Date.now()}`,
           name: videoData.title || videoData.filename,
@@ -3227,7 +3365,7 @@
           url: videoData.url,
           sourceUrl: videoData.sourceUrl,
           offset: 0,
-          duration: 0,
+          duration: initialDuration, // Will be updated by handleVideoLoaded when video metadata loads
           volume: 1.0,
           trimStart: videoData.defaultTrimStart || 0,
           trimEnd: videoData.defaultTrimEnd || 0,
@@ -3237,7 +3375,45 @@
           cropHeight: videoData.defaultCropHeight || 100,
           color: `hsl(${videos.length * 60}, 70%, 50%)`
         };
+        
+        console.log(`[AddFromLibrary] Adding video:`, {
+          name: newInstance.name,
+          filename: newInstance.filename,
+          libraryDuration: videoData.duration,
+          initialDuration: initialDuration,
+          url: newInstance.url
+        });
+        
         setVideos(prev => [...prev, newInstance]);
+        
+        // If duration is missing, try to load it from the video element
+        // This will happen automatically when the video element renders and fires onLoadedMetadata
+        // But we can also proactively try to get it if the video is already in downloadedVideos
+        if (!initialDuration && videoData.url) {
+          // Create a temporary video element to load duration
+          const tempVideo = document.createElement('video');
+          tempVideo.preload = 'metadata';
+          tempVideo.src = videoData.url;
+          tempVideo.crossOrigin = 'anonymous';
+          
+          tempVideo.addEventListener('loadedmetadata', () => {
+            const duration = tempVideo.duration;
+            if (duration && duration > 0) {
+              console.log(`[AddFromLibrary] Loaded duration from video element: ${duration}s for ${newInstance.name}`);
+              setVideos(prev => prev.map(v => 
+                v.id === newInstance.id ? { ...v, duration } : v
+              ));
+            }
+            tempVideo.remove();
+          });
+          
+          tempVideo.addEventListener('error', () => {
+            console.warn(`[AddFromLibrary] Failed to load metadata for ${newInstance.name}`);
+            tempVideo.remove();
+          });
+          
+          tempVideo.load();
+        }
       };
 
       const saveShow = async (name, silent = false) => {
@@ -3319,12 +3495,28 @@
         }
       }, [currentView, currentShowName, videos, totalDuration, zoom]);
 
+      // Update ref whenever isPlaying changes
+      React.useEffect(() => {
+        isPlayingRef.current = isPlaying;
+        console.log(`[Playback] isPlaying changed to: ${isPlaying}, totalDuration: ${totalDuration}`);
+      }, [isPlaying, totalDuration]);
+
       // Video playback sync
       React.useEffect(() => {
-        if (isPlaying) {
+        if (isPlaying && totalDuration > 0) {
+          console.log(`[Playback] Starting playback loop, totalDuration: ${totalDuration}`);
           lastTimeRef.current = Date.now();
           
           const tick = () => {
+            // Check if still playing using ref (always current)
+            if (!isPlayingRef.current) {
+              if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+                animationRef.current = null;
+              }
+              return;
+            }
+            
             const now = Date.now();
             const delta = (now - lastTimeRef.current) / 1000;
             lastTimeRef.current = now;
@@ -3332,8 +3524,9 @@
             setMasterTime(prev => {
               const next = prev + delta;
               if (next >= totalDuration) {
+                isPlayingRef.current = false;
                 setIsPlaying(false);
-                return 0;
+                return totalDuration;
               }
               return next;
             });
@@ -3342,35 +3535,128 @@
           };
           
           animationRef.current = requestAnimationFrame(tick);
-        } else if (animationRef.current) {
-          cancelAnimationFrame(animationRef.current);
+        } else {
+          console.log(`[Playback] Stopping playback loop, isPlaying: ${isPlaying}, totalDuration: ${totalDuration}`);
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+            animationRef.current = null;
+          }
         }
         
         return () => {
-          if (animationRef.current) cancelAnimationFrame(animationRef.current);
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+            animationRef.current = null;
+          }
         };
       }, [isPlaying, totalDuration]);
 
       React.useEffect(() => {
+        console.log(`[Video Sync] Running sync, masterTime: ${masterTime.toFixed(2)}, isPlaying: ${isPlaying}, videos count: ${videos.length}`);
+        let activeCount = 0;
+        let playedCount = 0;
+        
         videos.forEach(video => {
           const videoEl = videoRefs.current[video.id];
-          if (!videoEl) return;
+          if (!videoEl) {
+            // Video not rendered yet (filtered out or not loaded)
+            return;
+          }
+          
+          // Skip if video doesn't have a valid duration yet
+          if (!video.duration || video.duration <= 0) {
+            return;
+          }
           
           videoEl.volume = video.volume || 1.0;
           
           const trimStart = video.trimStart || 0;
           const trimEnd = video.trimEnd || 0;
-          const videoTime = masterTime - video.offset;
+          const videoTime = masterTime - (video.offset || 0);
           const trimmedDuration = video.duration - trimStart - trimEnd;
           
+          if (trimmedDuration <= 0) return; // Invalid trim settings
+          
           if (videoTime >= 0 && videoTime <= trimmedDuration) {
+            activeCount++;
             const actualVideoTime = videoTime + trimStart;
             
-            if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.3) {
+            // Always ensure currentTime is set when video becomes active (to show first frame)
+            // Only sync if paused or way off (don't interrupt playback)
+            if (videoEl.paused) {
+              // When paused, always sync to show correct frame
+              if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+                videoEl.currentTime = actualVideoTime;
+                console.log(`[Video Sync] Setting ${video.id} to ${actualVideoTime.toFixed(2)}s (paused, showing frame)`);
+              }
+            } else if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.5) {
+              // When playing, only sync if way off
               videoEl.currentTime = actualVideoTime;
+              console.log(`[Video Sync] Syncing ${video.id} to ${actualVideoTime.toFixed(2)}s (was ${videoEl.currentTime.toFixed(2)}s)`);
             }
+            
             if (isPlaying && videoEl.paused) {
-              videoEl.play().catch(() => {});
+              // Check if video is ready to play
+              if (videoEl.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+                // Ensure video is visible (some browsers require visibility for playback)
+                const videoContainer = videoEl.parentElement;
+                if (videoContainer) {
+                  const computedStyle = window.getComputedStyle(videoContainer);
+                  if (computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.warn(`[Video Sync] Video ${video.id} container is hidden, making visible for playback`);
+                    videoContainer.style.visibility = 'visible';
+                    videoContainer.style.opacity = '1';
+                  }
+                }
+                
+                // Ensure currentTime is set before playing (but don't interrupt if already close)
+                if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+                  videoEl.currentTime = actualVideoTime;
+                }
+                
+                // Ensure volume is set
+                videoEl.volume = video.volume || 1.0;
+                
+                // Ensure not muted (unless volume is 0)
+                if (video.volume > 0) {
+                  videoEl.muted = false;
+                }
+                
+                console.log(`[Video Sync] Attempting to play ${video.id} at ${actualVideoTime.toFixed(2)}s, readyState: ${videoEl.readyState}`);
+                const playPromise = videoEl.play();
+                if (playPromise !== undefined) {
+                  playPromise.then(() => {
+                    playedCount++;
+                    // Verify video is actually playing after a short delay
+                    setTimeout(() => {
+                      if (videoEl.paused) {
+                        console.warn(`[Video Sync] ⚠ Video ${video.id} paused immediately after play() call`);
+                        console.warn(`  - readyState: ${videoEl.readyState}, networkState: ${videoEl.networkState}`);
+                        console.warn(`  - currentTime: ${videoEl.currentTime}, duration: ${videoEl.duration}`);
+                        console.warn(`  - error: ${videoEl.error ? videoEl.error.message : 'none'}`);
+                      } else {
+                        console.log(`[Video Sync] ✓ Video ${video.id} is playing at ${videoEl.currentTime.toFixed(2)}s`);
+                      }
+                    }, 100);
+                  }).catch(err => {
+                    console.error(`[Video Sync] ✗ Failed to play ${video.id} (${video.name || 'unnamed'}):`, err);
+                    console.error('Video element state:', {
+                      paused: videoEl.paused,
+                      readyState: videoEl.readyState,
+                      networkState: videoEl.networkState,
+                      src: videoEl.src,
+                      currentSrc: videoEl.currentSrc,
+                      currentTime: videoEl.currentTime,
+                      duration: videoEl.duration,
+                      error: videoEl.error ? videoEl.error.message : null,
+                      visible: videoEl.offsetParent !== null,
+                      display: window.getComputedStyle(videoEl).display
+                    });
+                  });
+                }
+              } else {
+                console.warn(`[Video Sync] Video ${video.id} not ready (readyState: ${videoEl.readyState}), waiting...`);
+              }
             } else if (!isPlaying && !videoEl.paused) {
               videoEl.pause();
             }
@@ -3379,6 +3665,25 @@
             if (videoTime < 0) videoEl.currentTime = trimStart;
           }
         });
+        
+        if (isPlaying && activeCount > 0) {
+          console.log(`[Video Sync] ${activeCount} videos active, ${playedCount} attempted to play`);
+          // Log which videos are actually playing vs paused
+          videos.forEach(video => {
+            const videoEl = videoRefs.current[video.id];
+            if (videoEl) {
+              const videoTime = masterTime - (video.offset || 0);
+              const trimStart = video.trimStart || 0;
+              const trimEnd = video.trimEnd || 0;
+              const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+              if (videoTime >= 0 && videoTime <= trimmedDuration) {
+                if (videoEl.paused && isPlaying) {
+                  console.warn(`[Video Sync] ⚠ Video ${video.id} should be playing but is paused!`);
+                }
+              }
+            }
+          });
+        }
       }, [masterTime, videos, isPlaying]);
 
       // Show loading while checking auth

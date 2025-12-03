@@ -9,6 +9,7 @@ import subprocess
 import threading
 import uuid
 import requests
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -1287,15 +1288,73 @@ def serve_video(filename):
     """Serve a video file from R2 or local storage"""
     # Check if file exists in R2 first
     if R2_ENABLED and file_exists_in_r2(filename):
-        # Generate presigned URL (valid for 1 hour)
-        r2_url = get_r2_url(filename, expires_in=3600)
-        if r2_url:
-            return redirect(r2_url)
+        # Instead of redirecting (which causes CORS issues), proxy the video through backend
+        # This allows us to add CORS headers
+        try:
+            from r2_storage import s3_client, R2_BUCKET_NAME
+            if s3_client and R2_BUCKET_NAME:
+                # Get the object from R2
+                response = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=filename)
+                
+                # Determine content type
+                content_type = response.get('ContentType', 'video/mp4')
+                content_length = response.get('ContentLength')
+                
+                # Stream the video with CORS headers
+                def generate():
+                    for chunk in iter(lambda: response['Body'].read(8192), b''):
+                        yield chunk
+                
+                headers = {
+                    'Content-Type': content_type,
+                    'Accept-Ranges': 'bytes',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Range',
+                }
+                if content_length:
+                    headers['Content-Length'] = str(content_length)
+                
+                # Handle Range requests for video seeking
+                range_header = request.headers.get('Range')
+                if range_header:
+                    # Parse range header (e.g., "bytes=0-1023")
+                    match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                    if match:
+                        start = int(match.group(1))
+                        end = int(match.group(2)) if match.group(2) else content_length - 1 if content_length else None
+                        
+                        # Get partial object
+                        range_response = s3_client.get_object(
+                            Bucket=R2_BUCKET_NAME,
+                            Key=filename,
+                            Range=f'bytes={start}-{end}'
+                        )
+                        
+                        headers['Content-Range'] = f'bytes {start}-{end}/{content_length}'
+                        headers['Content-Length'] = str(end - start + 1)
+                        headers['HTTP/1.1'] = '206 Partial Content'
+                        
+                        def generate_range():
+                            for chunk in iter(lambda: range_response['Body'].read(8192), b''):
+                                yield chunk
+                        
+                        return Response(generate_range(), 206, headers)
+                
+                return Response(generate(), 200, headers)
+        except Exception as e:
+            print(f"✗ Error proxying video from R2: {str(e)}")
+            # Fall through to local file fallback
     
     # Fallback to local file if R2 not enabled or file not in R2
     filepath = VIDEOS_DIR / filename
     if filepath.exists():
-        return send_from_directory(str(VIDEOS_DIR), filename)
+        response = send_from_directory(str(VIDEOS_DIR), filename)
+        # Add CORS headers to local file response
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Range'
+        return response
     
     return jsonify({"error": "Video not found"}), 404
 
