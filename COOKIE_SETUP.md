@@ -58,3 +58,4 @@ If you prefer to export cookies manually:
 - ✅ **Secure** - cookies stay on your machine until you send them
 - ✅ **Easy updates** - just run the script again when cookies expire
 
+
