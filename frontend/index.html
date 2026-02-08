@@ -48,27 +48,6 @@
       ? 'http://localhost:5000' 
       : window.location.origin;
 
-    // ======================
-    // Client-Side YouTube Downloader (Multiple Methods + IndexedDB)
-    // ======================
-    
-    // Piped instances (more reliable alternative to Invidious)
-    const PIPED_INSTANCES = [
-      'https://pipedapi.kavin.rocks',
-      'https://api-piped.mha.fi',
-      'https://pipedapi.tokhmi.xyz',
-      'https://piped-api.garudalinux.org',
-      'https://pipedapi.osphost.fi'
-    ];
-    
-    // Invidious instances (fallback)
-    const INVIDIOUS_INSTANCES = [
-      'https://invidious.flokinet.to',
-      'https://invidious.io.lol',
-      'https://invidious.osi.kr',
-      'https://yewtu.be'
-    ];
-    
     // Extract YouTube video ID from URL
     function extractVideoId(url) {
       const patterns = [
@@ -82,428 +61,6 @@
         if (match) return match[1];
       }
       return null;
-    }
-    
-    // IndexedDB utilities for storing videos
-    const DB_NAME = 'FireworksVideos';
-    const DB_VERSION = 1;
-    const STORE_NAME = 'videos';
-    
-    async function openVideoDB() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        
-        request.onupgradeneeded = (event) => {
-          const db = event.target.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            const store = db.createObjectStore(STORE_NAME, { keyPath: 'videoId' });
-            store.createIndex('timestamp', 'timestamp', { unique: false });
-          }
-        };
-      });
-    }
-    
-    async function saveVideoToDB(videoId, blob, metadata = {}) {
-      const db = await openVideoDB();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        
-        const request = store.put({
-          videoId,
-          blob,
-          timestamp: Date.now(),
-          ...metadata
-        });
-        
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-      });
-    }
-    
-    async function getVideoFromDB(videoId) {
-      const db = await openVideoDB();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.get(videoId);
-        
-        request.onsuccess = () => {
-          const result = request.result;
-          if (result && result.blob) {
-            resolve(URL.createObjectURL(result.blob));
-          } else {
-            resolve(null);
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
-    }
-    
-    async function getVideoMetadataFromDB(videoId) {
-      const db = await openVideoDB();
-      return new Promise((resolve, reject) => {
-        const transaction = db.transaction([STORE_NAME], 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.get(videoId);
-        
-        request.onsuccess = () => {
-          const result = request.result;
-          if (result) {
-            resolve({
-              videoId: result.videoId,
-              title: result.title,
-              timestamp: result.timestamp,
-              ...result
-            });
-          } else {
-            resolve(null);
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
-    }
-    
-    // Download video via Piped API (preferred method)
-    async function downloadViaPiped(videoId, onProgress) {
-      console.log('[Piped] Starting download via Piped API for video:', videoId);
-      console.log('[Piped] Available instances:', PIPED_INSTANCES.length);
-      
-      for (let i = 0; i < PIPED_INSTANCES.length; i++) {
-        const instance = PIPED_INSTANCES[i];
-        try {
-          console.log(`[Piped] Attempt ${i + 1}/${PIPED_INSTANCES.length}: Trying instance ${instance}`);
-          
-          // Get video info
-          const infoUrl = `${instance}/streams/${videoId}`;
-          console.log('[Piped] Fetching video info from:', infoUrl);
-          
-          const infoResponse = await fetch(infoUrl, {
-            headers: { 'Accept': 'application/json' }
-          });
-          
-          console.log('[Piped] Info response status:', infoResponse.status, infoResponse.statusText);
-          
-          if (!infoResponse.ok) {
-            const errorText = await infoResponse.text().catch(() => 'No error details');
-            console.warn(`[Piped] Instance ${instance} returned ${infoResponse.status}:`, errorText);
-            throw new Error(`HTTP ${infoResponse.status}: ${errorText.substring(0, 100)}`);
-          }
-          
-          const videoInfo = await infoResponse.json();
-          console.log('[Piped] Video info received:', {
-            title: videoInfo.title,
-            hasStreams: !!videoInfo.videoStreams,
-            streamCount: videoInfo.videoStreams?.length || 0
-          });
-          
-          if (!videoInfo.videoStreams || videoInfo.videoStreams.length === 0) {
-            console.warn('[Piped] No video streams in response:', videoInfo);
-            throw new Error('No video streams available');
-          }
-          
-          // Find best quality video format
-          const videoStreams = videoInfo.videoStreams.filter(s => 
-            s.format === 'mp4' || s.format === 'webm'
-          );
-          
-          console.log('[Piped] Filtered video streams:', {
-            total: videoInfo.videoStreams.length,
-            compatible: videoStreams.length,
-            formats: videoStreams.map(s => ({ format: s.format, quality: s.quality }))
-          });
-          
-          if (videoStreams.length === 0) {
-            console.warn('[Piped] No compatible formats. Available formats:', 
-              videoInfo.videoStreams.map(s => s.format).join(', '));
-            throw new Error('No compatible video formats');
-          }
-          
-          // Sort by quality (best first)
-          videoStreams.sort((a, b) => {
-            const aQuality = parseInt(a.quality?.replace('p', '') || '0', 10);
-            const bQuality = parseInt(b.quality?.replace('p', '') || '0', 10);
-            return bQuality - aQuality;
-          });
-          
-          const bestStream = videoStreams[0];
-          const videoUrl = bestStream.url;
-          
-          console.log('[Piped] Selected stream:', {
-            quality: bestStream.quality,
-            format: bestStream.format,
-            urlLength: videoUrl?.length || 0,
-            hasUrl: !!videoUrl
-          });
-          
-          if (!videoUrl) {
-            console.error('[Piped] Stream object:', bestStream);
-            throw new Error('No video URL found in stream');
-          }
-          
-          console.log(`[Piped] Starting download from: ${instance}`);
-          console.log(`[Piped] Video URL: ${videoUrl.substring(0, 100)}...`);
-          
-          // Download the video with progress tracking
-          console.log('[Piped] Fetching video file...');
-          const videoResponse = await fetch(videoUrl);
-          
-          console.log('[Piped] Video response:', {
-            status: videoResponse.status,
-            statusText: videoResponse.statusText,
-            contentType: videoResponse.headers.get('Content-Type'),
-            contentLength: videoResponse.headers.get('Content-Length')
-          });
-          
-          if (!videoResponse.ok) {
-            const errorText = await videoResponse.text().catch(() => 'No error details');
-            console.error(`[Piped] Download failed: HTTP ${videoResponse.status}`, errorText.substring(0, 200));
-            throw new Error(`Download failed: HTTP ${videoResponse.status}`);
-          }
-          
-          const contentLength = parseInt(videoResponse.headers.get('Content-Length') || '0', 10);
-          console.log('[Piped] Content length:', contentLength, 'bytes');
-          
-          const reader = videoResponse.body.getReader();
-          
-          let receivedLength = 0;
-          const chunks = [];
-          let lastProgressLog = 0;
-          
-          console.log('[Piped] Starting to read video stream...');
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              console.log('[Piped] Stream reading complete. Total received:', receivedLength, 'bytes');
-              break;
-            }
-            
-            chunks.push(value);
-            receivedLength += value.length;
-            
-            if (onProgress && contentLength > 0) {
-              const percentage = (receivedLength / contentLength) * 100;
-              
-              // Log progress every 10%
-              if (percentage - lastProgressLog >= 10) {
-                console.log(`[Piped] Download progress: ${Math.round(percentage)}% (${receivedLength}/${contentLength} bytes)`);
-                lastProgressLog = percentage;
-              }
-              
-              onProgress({
-                loaded: receivedLength,
-                total: contentLength,
-                percentage: Math.min(percentage, 100)
-              });
-            }
-          }
-          
-          console.log('[Piped] Creating blob from chunks...');
-          const blob = new Blob(chunks, { type: 'video/mp4' });
-          console.log('[Piped] Blob created:', {
-            size: blob.size,
-            type: blob.type
-          });
-          
-          // Save to IndexedDB
-          console.log('[Piped] Saving to IndexedDB...');
-          await saveVideoToDB(videoId, blob, {
-            title: videoInfo.title || `Video ${videoId}`,
-            duration: videoInfo.duration || 0,
-            thumbnail: videoInfo.thumbnailUrl
-          });
-          console.log('[Piped] Saved to IndexedDB successfully');
-          
-          const localUrl = URL.createObjectURL(blob);
-          console.log('[Piped] Download complete!', {
-            videoId,
-            title: videoInfo.title,
-            blobSize: blob.size,
-            instance
-          });
-          
-          return {
-            success: true,
-            videoId,
-            title: videoInfo.title || `Video ${videoId}`,
-            blob,
-            localUrl: localUrl,
-            instance: `Piped (${instance})`
-          };
-          
-        } catch (error) {
-          console.warn(`[Piped] Instance ${instance} failed:`, {
-            message: error.message,
-            stack: error.stack,
-            attempt: i + 1,
-            total: PIPED_INSTANCES.length
-          });
-          continue;
-        }
-      }
-      
-      console.error('[Piped] All instances failed after trying', PIPED_INSTANCES.length, 'instances');
-      throw new Error('All Piped instances failed');
-    }
-    
-    // Download video via Invidious API (fallback)
-    async function downloadViaInvidious(videoId, onProgress) {
-      for (const instance of INVIDIOUS_INSTANCES) {
-        try {
-          console.log(`Trying Invidious instance: ${instance}`);
-          
-          const infoResponse = await fetch(`${instance}/api/v1/videos/${videoId}`, {
-            headers: { 'Accept': 'application/json' }
-          });
-          
-          if (!infoResponse.ok) {
-            throw new Error(`HTTP ${infoResponse.status}`);
-          }
-          
-          const videoInfo = await infoResponse.json();
-          const formats = videoInfo.formatStreams || videoInfo.adaptiveFormats || [];
-          const videoFormats = formats.filter(f => 
-            f.type && (f.type.includes('video/mp4') || f.type.includes('video/webm'))
-          );
-          
-          if (videoFormats.length === 0) {
-            throw new Error('No video formats available');
-          }
-          
-          videoFormats.sort((a, b) => {
-            const aQuality = a.quality || a.bitrate || 0;
-            const bQuality = b.quality || b.bitrate || 0;
-            return bQuality - aQuality;
-          });
-          
-          const bestFormat = videoFormats[0];
-          const videoUrl = bestFormat.url || bestFormat.src;
-          
-          if (!videoUrl) {
-            throw new Error('No video URL found');
-          }
-          
-          console.log(`Downloading from Invidious: ${instance}`);
-          
-          const videoResponse = await fetch(videoUrl);
-          if (!videoResponse.ok) {
-            throw new Error(`Download failed: HTTP ${videoResponse.status}`);
-          }
-          
-          const contentLength = parseInt(videoResponse.headers.get('Content-Length') || '0', 10);
-          const reader = videoResponse.body.getReader();
-          
-          let receivedLength = 0;
-          const chunks = [];
-          
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            chunks.push(value);
-            receivedLength += value.length;
-            
-            if (onProgress && contentLength > 0) {
-              const percentage = (receivedLength / contentLength) * 100;
-              onProgress({
-                loaded: receivedLength,
-                total: contentLength,
-                percentage: Math.min(percentage, 100)
-              });
-            }
-          }
-          
-          const blob = new Blob(chunks, { type: 'video/mp4' });
-          
-          await saveVideoToDB(videoId, blob, {
-            title: videoInfo.title || `Video ${videoId}`,
-            duration: videoInfo.lengthSeconds || 0,
-            thumbnail: videoInfo.videoThumbnails?.[0]?.url
-          });
-          
-          return {
-            success: true,
-            videoId,
-            title: videoInfo.title || `Video ${videoId}`,
-            blob,
-            localUrl: URL.createObjectURL(blob),
-            instance: `Invidious (${instance})`
-          };
-          
-        } catch (error) {
-          console.warn(`Invidious instance ${instance} failed:`, error.message);
-          continue;
-        }
-      }
-      
-      throw new Error('All Invidious instances failed');
-    }
-    
-    // Main client-side download function with multiple fallbacks
-    async function downloadYouTubeVideoClient(url, onProgress) {
-      console.log('[DownloadClient] Starting client-side download...', { url });
-      
-      const videoId = extractVideoId(url);
-      console.log('[DownloadClient] Extracted video ID:', videoId);
-      
-      if (!videoId) {
-        console.error('[DownloadClient] Invalid video ID extracted from URL:', url);
-        throw new Error('Invalid YouTube URL');
-      }
-      
-      // Check if already downloaded
-      console.log('[DownloadClient] Checking cache...');
-      const existing = await getVideoFromDB(videoId);
-      if (existing) {
-        console.log('[DownloadClient] Video found in cache, returning cached version');
-        const metadata = await getVideoMetadataFromDB(videoId);
-        return {
-          success: true,
-          videoId,
-          title: metadata?.title || `Video ${videoId}`,
-          localUrl: existing,
-          cached: true
-        };
-      }
-      
-      console.log('[DownloadClient] Video not cached, starting download process...');
-      
-      // Try Piped first (most reliable)
-      try {
-        console.log('[DownloadClient] Attempting download via Piped API (primary method)...');
-        const result = await downloadViaPiped(videoId, onProgress);
-        console.log('[DownloadClient] Piped download successful!');
-        return result;
-      } catch (pipedError) {
-        console.error('[DownloadClient] Piped download failed:', {
-          message: pipedError.message,
-          stack: pipedError.stack
-        });
-        console.log('[DownloadClient] Falling back to Invidious API...');
-        
-        // Fallback to Invidious
-        try {
-          const result = await downloadViaInvidious(videoId, onProgress);
-          console.log('[DownloadClient] Invidious download successful!');
-          return result;
-        } catch (invidiousError) {
-          console.error('[DownloadClient] Invidious download also failed:', {
-            message: invidiousError.message,
-            stack: invidiousError.stack
-          });
-          console.error('[DownloadClient] All client-side methods failed. Error summary:', {
-            pipedError: pipedError.message,
-            invidiousError: invidiousError.message,
-            videoId: videoId
-          });
-          
-          // Final fallback: server-side download (if available)
-          throw new Error(`Client-side download failed. Piped: ${pipedError.message}. Invidious: ${invidiousError.message}`);
-        }
-      }
     }
 
     // ======================
@@ -765,26 +322,7 @@
           return;
         }
         
-        // Check if already downloaded locally (IndexedDB)
-        console.log('[Download] Checking IndexedDB for existing video...');
-        const existing = await getVideoFromDB(videoId);
-        if (existing) {
-          console.log('[Download] Video found in local cache');
-          const metadata = await getVideoMetadataFromDB(videoId);
-          onDownloadComplete({
-            id: videoId,
-            videoId: videoId,
-            filename: `${videoId}.mp4`,
-            title: metadata?.title || `Video ${videoId}`,
-            status: 'complete',
-            localUrl: existing,
-            cached: true
-          });
-          setYoutubeUrl('');
-          return;
-        }
-        
-        // Use yt-dlp directly (works reliably with proxy and cookies)
+        // Use yt-dlp server-side download
         console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
@@ -983,7 +521,7 @@
                 React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 YouTube Downloader'),
                 React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
                   React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
-                  'Client-side download • No server required'
+                  'Server-side download via yt-dlp'
                 ),
                 
                 React.createElement('div', { className: 'space-y-3' },
@@ -1166,7 +704,7 @@
             })
           );
           
-          // Update only server-side downloads, keep client-side downloads as-is
+          // Update server-side downloads
           setDownloading(prev => {
             const clientDownloads = prev.filter(dl => !dl.serverSide);
             const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
@@ -1205,26 +743,7 @@
           return;
         }
         
-        // Check if already downloaded locally (IndexedDB)
-        console.log('[Download] Checking IndexedDB for existing video...');
-        const existing = await getVideoFromDB(videoId);
-        if (existing) {
-          console.log('[Download] Video found in local cache');
-          const metadata = await getVideoMetadataFromDB(videoId);
-          onDownloadComplete({
-            id: videoId,
-            videoId: videoId,
-            filename: `${videoId}.mp4`,
-            title: metadata?.title || `Video ${videoId}`,
-            status: 'complete',
-            localUrl: existing,
-            cached: true
-          });
-          setYoutubeUrl('');
-          return;
-        }
-        
-        // Use yt-dlp directly (works reliably with proxy and cookies)
+        // Use yt-dlp server-side download
         console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
@@ -1361,7 +880,7 @@
                 React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 Add Videos to Library'),
                 React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
                   React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
-                  'Client-side download • No server required'
+                  'Server-side download via yt-dlp'
                 ),
                 
                 React.createElement('div', { className: 'space-y-3' },
@@ -1858,6 +1377,94 @@
       const [showSaveAs, setShowSaveAs] = React.useState(false);
       const [showLibraryAdd, setShowLibraryAdd] = React.useState(false);
       
+      // Track which videos have loaded their metadata
+      const [loadedVideoIds, setLoadedVideoIds] = React.useState(new Set());
+      
+      // Track buffering progress per video (buffered ranges)
+      const [bufferedRanges, setBufferedRanges] = React.useState(new Map()); // videoId -> { buffered: number, total: number, percentage: number }
+      const [errorVideoIds, setErrorVideoIds] = React.useState(new Set());
+      
+      // Track which videos have at least metadata loaded (readyState >= 1)
+      const [videosWithMetadata, setVideosWithMetadata] = React.useState(new Set());
+      // Track which videos have enough data to play (readyState >= 2)
+      const [videosReadyToPlay, setVideosReadyToPlay] = React.useState(new Set());
+      
+      // Check if videos are ready to play - require HAVE_CURRENT_DATA (readyState >= 2) for ALL videos
+      // This ensures videos have actual frames loaded before playback can start
+      const canStartPlayback = React.useMemo(() => {
+        if (videos.length === 0) return true;
+        
+        // Check ALL videos that have duration (not just active ones)
+        // This ensures all videos are ready before playback starts
+        const videosWithDuration = videos.filter(v => v.duration && v.duration > 0);
+        
+        if (videosWithDuration.length === 0) {
+          // No videos have loaded metadata yet
+          return false;
+        }
+        
+        // Check if all videos with duration have enough data loaded to actually play (readyState >= 2)
+        const allReady = videosWithDuration.every(v => {
+          if (errorVideoIds.has(v.id)) return true; // Errors don't block
+          const videoEl = videoRefs.current[v.id];
+          if (videoEl) {
+            return videoEl.readyState >= 2; // HAVE_CURRENT_DATA or higher (can actually play)
+          }
+          return videosReadyToPlay.has(v.id); // Fallback to tracked state
+        });
+        
+        if (!allReady) {
+          const readyCount = videosWithDuration.filter(v => {
+            if (errorVideoIds.has(v.id)) return true;
+            const videoEl = videoRefs.current[v.id];
+            return videoEl ? videoEl.readyState >= 2 : videosReadyToPlay.has(v.id);
+          }).length;
+          console.log(`[Playback Check] Not ready: ${readyCount}/${videosWithDuration.length} videos ready`);
+        }
+        
+        return allReady;
+      }, [videos, errorVideoIds, videosReadyToPlay]);
+      
+      // Update videosReadyToPlay state when videos reach readyState >= 2
+      React.useEffect(() => {
+        videos.forEach(v => {
+          const videoEl = videoRefs.current[v.id];
+          if (videoEl && videoEl.readyState >= 2 && !videosReadyToPlay.has(v.id)) {
+            setVideosReadyToPlay(prev => new Set(prev).add(v.id));
+          }
+        });
+      }, [videos, videosReadyToPlay]);
+      
+      // Update buffered ranges periodically for visible videos
+      React.useEffect(() => {
+        const interval = setInterval(() => {
+          const newRanges = new Map();
+          videos.forEach(v => {
+            const videoEl = videoRefs.current[v.id];
+            if (videoEl && videoEl.buffered && videoEl.buffered.length > 0) {
+              const bufferedEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
+              const duration = videoEl.duration || v.duration || 0;
+              if (duration > 0) {
+                newRanges.set(v.id, {
+                  buffered: bufferedEnd,
+                  total: duration,
+                  percentage: (bufferedEnd / duration) * 100
+                });
+              }
+            }
+          });
+          if (newRanges.size > 0) {
+            setBufferedRanges(prev => {
+              const updated = new Map(prev);
+              newRanges.forEach((value, key) => updated.set(key, value));
+              return updated;
+            });
+          }
+        }, 500); // Update every 500ms
+        
+        return () => clearInterval(interval);
+      }, [videos]);
+      
       // YouTube download functionality
       const [showYoutubeDownload, setShowYoutubeDownload] = React.useState(false);
       const [youtubeUrl, setYoutubeUrl] = React.useState('');
@@ -1927,7 +1534,7 @@
             })
           );
           
-          // Update only server-side downloads, keep client-side downloads as-is
+          // Update server-side downloads
           setDownloading(prev => {
             const clientDownloads = prev.filter(dl => !dl.serverSide);
             const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
@@ -1966,26 +1573,7 @@
           return;
         }
         
-        // Check if already downloaded locally (IndexedDB)
-        console.log('[Download] Checking IndexedDB for existing video...');
-        const existing = await getVideoFromDB(videoId);
-        if (existing) {
-          console.log('[Download] Video found in local cache');
-          const metadata = await getVideoMetadataFromDB(videoId);
-          onDownloadComplete({
-            id: videoId,
-            videoId: videoId,
-            filename: `${videoId}.mp4`,
-            title: metadata?.title || `Video ${videoId}`,
-            status: 'complete',
-            localUrl: existing,
-            cached: true
-          });
-          setYoutubeUrl('');
-          return;
-        }
-        
-        // Use yt-dlp directly (works reliably with proxy and cookies)
+        // Use yt-dlp server-side download
         console.log('[Download] Starting download via yt-dlp...');
         const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
@@ -2050,21 +1638,34 @@
       };
 
       const handleVideoLoaded = (id, duration) => {
+        // Mark this video as loaded
+        setLoadedVideoIds(prev => new Set(prev).add(id));
+        
         setVideos(prev => {
           const updated = prev.map(v => {
             if (v.id === id) {
-              // Save duration to library metadata if we have filename
+              // Save duration to library metadata cache if we have filename
               if (v.filename && duration && duration > 0) {
-                // Save to localStorage (library sync will happen elsewhere)
+                // Save to localStorage for faster subsequent loads
                 try {
                   const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
-                  if (libraryData[v.filename]) {
-                    libraryData[v.filename] = {
-                      ...libraryData[v.filename],
-                      duration
-                    };
-                    localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                  // Create entry if it doesn't exist
+                  if (!libraryData[v.filename]) {
+                    libraryData[v.filename] = {};
                   }
+                  libraryData[v.filename] = {
+                    ...libraryData[v.filename],
+                    duration
+                  };
+                  localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                  
+                  // Also cache in a separate video metadata cache for quick lookup
+                  const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                  videoMetadataCache[v.filename] = {
+                    duration,
+                    cachedAt: Date.now()
+                  };
+                  localStorage.setItem('fwp_video_metadata_cache', JSON.stringify(videoMetadataCache));
                 } catch (err) {
                   console.warn('Failed to save duration to localStorage:', err);
                 }
@@ -2077,6 +1678,33 @@
           return updated;
         });
       };
+      
+      // Track which videos have had load() called to prevent duplicate loads
+      const videosLoadCalled = React.useRef(new Set());
+      
+      // Reset loaded/error videos when videos array changes
+      React.useEffect(() => {
+        setLoadedVideoIds(new Set());
+        setErrorVideoIds(new Set());
+        setVideosWithMetadata(new Set());
+        setVideosReadyToPlay(new Set());
+        videosLoadCalled.current = new Set(); // Reset load tracking when videos change
+      }, [videos.length]);
+      
+      // Force videos to start loading even when hidden
+      // Browsers don't load hidden videos even with preload='auto', so we need to explicitly call load()
+      // Only call load() once per video ID to prevent duplicate requests
+      React.useEffect(() => {
+        videos.forEach(video => {
+          const videoEl = videoRefs.current[video.id];
+          if (videoEl && videoEl.readyState === 0 && !videosLoadCalled.current.has(video.id)) {
+            // Video hasn't started loading yet and we haven't called load() - force it to load
+            console.log(`[Video Load] Forcing load for ${video.id} (${video.name})`);
+            videosLoadCalled.current.add(video.id);
+            videoEl.load();
+          }
+        });
+      }, [videos.length]); // Only run when number of videos changes, not on every videos array update
 
       const getEventX = (e) => {
         return e.touches ? e.touches[0].clientX : e.clientX;
@@ -2461,6 +2089,128 @@
           )
         ),
 
+        // Hidden video preloader - ensures all videos load enough data to play
+        // Deduplicate by filename/URL to avoid loading the same video multiple times
+        // Uses 'auto' preload to load actual video data, not just metadata
+        // Use visibility/positioning instead of display:none so videos can actually load
+        React.createElement('div', { 
+          style: { 
+            position: 'absolute',
+            left: '-9999px',
+            top: '-9999px',
+            width: '1px',
+            height: '1px',
+            overflow: 'hidden',
+            visibility: 'hidden',
+            pointerEvents: 'none'
+          } 
+        },
+          (() => {
+            // Get unique videos that need preloading (all videos, even if they have cached duration)
+            // We need to ensure video data is loaded, not just metadata
+            const videosNeedingPreload = videos.filter(v => v.url);
+            const uniqueVideos = new Map();
+            
+            // Group by filename (preferred) or URL (fallback)
+            videosNeedingPreload.forEach(video => {
+              const key = video.filename || video.url;
+              if (key && !uniqueVideos.has(key)) {
+                uniqueVideos.set(key, video);
+              }
+            });
+            
+            return Array.from(uniqueVideos.values()).map(video => {
+              const key = video.filename || video.url;
+              return React.createElement('video', {
+                key: `preload-${key}`,
+                src: video.url,
+                preload: 'auto', // Load actual video data, not just metadata
+                onLoadedMetadata: (e) => {
+                  try {
+                    const duration = e.target.duration;
+                    if (duration && duration > 0) {
+                      console.log(`[Video Preloader] Loaded duration ${duration.toFixed(2)}s for ${video.filename || video.url}`);
+                      // Update all video instances with this filename/URL
+                      // Use setVideos to get current state and update all matching videos
+                      setVideos(prev => {
+                        const updated = prev.map(v => {
+                          const vKey = v.filename || v.url;
+                          if (vKey === key && (!v.duration || v.duration === 0)) {
+                            // Mark as loaded
+                            setLoadedVideoIds(loadedIds => new Set(loadedIds).add(v.id));
+                            
+                            // Mark as having metadata loaded
+                            setVideosWithMetadata(prev => new Set(prev).add(v.id));
+                            
+                            // Save duration to library metadata cache if we have filename
+                            if (v.filename && duration && duration > 0) {
+                              try {
+                                const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                                if (!libraryData[v.filename]) {
+                                  libraryData[v.filename] = {};
+                                }
+                                libraryData[v.filename] = {
+                                  ...libraryData[v.filename],
+                                  duration
+                                };
+                                localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                                
+                                // Also cache in video metadata cache
+                                const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                                videoMetadataCache[v.filename] = {
+                                  duration,
+                                  cachedAt: Date.now()
+                                };
+                                localStorage.setItem('fwp_video_metadata_cache', JSON.stringify(videoMetadataCache));
+                              } catch (err) {
+                                console.warn('Failed to save duration to localStorage:', err);
+                              }
+                            }
+                            
+                            return { ...v, duration };
+                          }
+                          return v;
+                        });
+                        return updated;
+                      });
+                      
+                    }
+                  } catch (err) {
+                    console.error(`[Video Preloader] Error loading metadata for ${key}:`, err);
+                  }
+                },
+                onCanPlay: (e) => {
+                  // Video has enough data loaded to play - mark all instances as ready
+                  console.log(`[Video Preloader] Video ready to play: ${video.filename || video.url}, readyState: ${e.target.readyState}`);
+                  // Mark all video instances with this filename/URL as ready
+                  setVideos(prev => {
+                    prev.forEach(v => {
+                      const vKey = v.filename || v.url;
+                      if (vKey === key) {
+                        setVideosReadyToPlay(prev => new Set(prev).add(v.id));
+                      }
+                    });
+                    return prev; // Don't modify, just trigger the check
+                  });
+                },
+                onError: (e) => {
+                  console.error(`[Video Preloader] Failed to load video for ${video.filename || video.url}:`, video.url, e);
+                  // Mark all instances of this video as having an error so they don't block loading
+                  setVideos(prev => {
+                    prev.forEach(v => {
+                      const vKey = v.filename || v.url;
+                      if (vKey === key) {
+                        setErrorVideoIds(errorIds => new Set(errorIds).add(v.id));
+                      }
+                    });
+                    return prev; // Don't modify, just trigger the check
+                  });
+                }
+              });
+            });
+          })()
+        ),
+
         // Video Grid Section
         React.createElement('div', { className: 'mb-4' },
           React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-2 gap-2' },
@@ -2520,11 +2270,12 @@
                     ...(shouldShow ? {} : { left: '-9999px', top: '-9999px', zIndex: -1 })
                   }
                 },
-                  video.url 
+                      video.url 
                     ? React.createElement('video', {
                         ref: el => {
                           if (el) {
                             videoRefs.current[video.id] = el;
+                            // Don't call load() here - let the useEffect handle it to avoid duplicate calls
                           }
                         },
                         src: video.url,
@@ -2554,9 +2305,13 @@
                         },
                         onError: (e) => {
                           console.error(`Failed to load video ${video.name}:`, video.url, e);
+                          // Mark video as having an error so it doesn't block loading screen
+                          setErrorVideoIds(prev => new Set(prev).add(video.id));
                         },
-                        onCanPlay: () => {
-                          console.log(`[Video] ${video.id} can play:`, video.url);
+                        onCanPlay: (e) => {
+                          console.log(`[Video] ${video.id} can play:`, video.url, `readyState: ${e.target.readyState}`);
+                          // Video has enough data to play - mark as ready
+                          setVideosReadyToPlay(prev => new Set(prev).add(video.id));
                         },
                         onPlay: () => {
                           console.log(`[Video] ${video.id} started playing`);
@@ -2650,9 +2405,22 @@
               className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
             }, '-1s'),
             React.createElement('button', {
-              onClick: () => setIsPlaying(!isPlaying),
-              className: `px-6 py-3 md:py-2 rounded font-bold text-base md:text-sm ${isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`
-            }, isPlaying ? '⏸ Pause' : '▶ Play'),
+              onClick: () => {
+                if (!canStartPlayback && !isPlaying) {
+                  showToast('Videos are still loading. Please wait...', 'warning');
+                  return;
+                }
+                setIsPlaying(!isPlaying);
+              },
+              disabled: !canStartPlayback && !isPlaying,
+              className: `px-6 py-3 md:py-2 rounded font-bold text-base md:text-sm ${
+                !canStartPlayback && !isPlaying
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  : isPlaying 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : 'bg-green-600 hover:bg-green-700'
+              }`
+            }, !canStartPlayback && !isPlaying ? '⏳ Loading...' : (isPlaying ? '⏸ Pause' : '▶ Play')),
             React.createElement('button', {
               onClick: () => setMasterTime(prev => Math.min(totalDuration, prev + 1)),
               className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
@@ -2757,20 +2525,49 @@
                 }, `${video.name} (loading...)`);
               }
               
+              const bufferedInfo = bufferedRanges.get(video.id);
+              const bufferedPercentage = bufferedInfo ? bufferedInfo.percentage : 0;
+              const isBuffering = bufferedPercentage < 100 && bufferedPercentage > 0;
+              const videoEl = videoRefs.current[video.id];
+              const hasMetadata = videoEl ? videoEl.readyState >= 1 : videosWithMetadata.has(video.id);
+              const isReadyToPlay = videoEl ? videoEl.readyState >= 2 : videosReadyToPlay.has(video.id);
+              const isLoading = !isReadyToPlay && !errorVideoIds.has(video.id);
+              
               return React.createElement('div', {
                 key: video.id,
-                className: 'absolute h-10 md:h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg no-select touch-none',
+                className: 'absolute h-10 md:h-8 rounded cursor-move flex flex-col overflow-hidden transition-shadow hover:shadow-lg no-select touch-none',
                 style: {
                   top: index * 50 + 10,
                   left: `${((video.offset || 0) / totalDuration) * 100 * zoom}%`,
                   width: `${(trimmedDuration / totalDuration) * 100 * zoom}%`,
                   backgroundColor: video.color,
                   minWidth: '60px',
-                  touchAction: 'none'
+                  touchAction: 'none',
+                  opacity: isLoading ? 0.5 : 1
                 },
                 onMouseDown: (e) => handleTimelineMouseDown(e, video.id),
                 onTouchStart: (e) => handleTimelineMouseDown(e, video.id)
-              }, `${video.name} (${trimmedDuration.toFixed(1)}s)`);
+              },
+                // Loading indicator (no metadata yet)
+                isLoading ? React.createElement('div', {
+                  className: 'absolute inset-0 flex items-center justify-center bg-black/30 z-20'
+                }, React.createElement('div', { className: 'text-[10px] text-white' }, 'Loading...')) : null,
+                // Buffering progress bar overlay
+                isBuffering ? React.createElement('div', {
+                  className: 'absolute top-0 left-0 h-1 bg-white/40 transition-all z-10',
+                  style: {
+                    width: `${bufferedPercentage}%`
+                  }
+                }) : null,
+                // Video name and duration
+                React.createElement('div', {
+                  className: 'flex items-center px-2 text-xs font-medium whitespace-nowrap h-full relative z-10',
+                  style: { color: '#fff', textShadow: '1px 1px 2px rgba(0,0,0,0.8)' }
+                }, 
+                  `${video.name} (${trimmedDuration.toFixed(1)}s)`,
+                  isBuffering ? React.createElement('span', { className: 'ml-1 text-[10px] opacity-75' }, `[${Math.round(bufferedPercentage)}%]`) : null
+                )
+              );
             })
           ),
           React.createElement('p', { className: 'text-xs text-gray-500 mt-2' },
@@ -2964,44 +2761,7 @@
         // Only load from server if authenticated
         const videoMap = new Map();
         
-        // First, load videos from IndexedDB (client-side downloads)
-        try {
-          const db = await openVideoDB();
-          const transaction = db.transaction([STORE_NAME], 'readonly');
-          const store = transaction.objectStore(STORE_NAME);
-          const request = store.getAll();
-          
-          await new Promise((resolve, reject) => {
-            request.onsuccess = () => {
-              request.result.forEach(item => {
-                const videoId = item.videoId;
-                const filename = `${videoId}.mp4`;
-                const localUrl = URL.createObjectURL(item.blob);
-                videoMap.set(filename, {
-                  filename: filename,
-                  title: item.title || `Video ${videoId}`,
-                  url: localUrl,
-                  sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-                  size: null,
-                  duration: item.duration || null,
-                  defaultTrimStart: 0,
-                  defaultTrimEnd: 0,
-                  defaultCropX: 0,
-                  defaultCropY: 0,
-                  defaultCropWidth: 100,
-                  defaultCropHeight: 100,
-                  localUrl: true
-                });
-              });
-              resolve();
-            };
-            request.onerror = () => reject(request.error);
-          });
-        } catch (err) {
-          console.warn('Failed to load videos from IndexedDB:', err);
-        }
-        
-        // Also load from server if authenticated (for backward compatibility)
+        // Load from server if authenticated
         if (authenticated) {
           try {
             const videosRes = await fetch(`${API_BASE}/api/videos`, {
@@ -3024,7 +2784,7 @@
               }
               
               serverVideos.forEach(video => {
-                // Only add if not already in map (IndexedDB takes precedence)
+                // Add all videos from server
                 if (!videoMap.has(video.filename)) {
                   const savedData = serverLibrary[video.filename] || {};
                   videoMap.set(video.filename, {
@@ -3136,27 +2896,76 @@
           return;
         }
 
+        // Clean up existing videos
         videos.forEach(v => {
           if (v.url && v.url.startsWith('blob:')) {
             URL.revokeObjectURL(v.url);
           }
         });
+        
+        // Clear video refs to ensure fresh initialization
+        Object.keys(videoRefs.current).forEach(key => {
+          delete videoRefs.current[key];
+        });
 
-        // Restore video URLs - match with downloadedVideos to get correct URLs
+        // Restore video URLs - always reconstruct from API_BASE and filename to ensure correct environment
         const restoredVideos = session.videos
-          .filter(v => v.filename || v.url)
+          .filter(v => v.filename)
           .map(v => {
-            // Try to find video in downloadedVideos map to get correct URL and duration
+            // Try to find video in downloadedVideos map to get URL (may be blob URL for local videos)
             const libraryVideo = downloadedVideos.get(v.filename);
-            const videoUrl = v.url || (libraryVideo ? libraryVideo.url : null) || (v.filename ? `${API_BASE}/videos/${v.filename}` : null);
             
-            // Use duration from saved show, or fall back to library video duration, or keep existing
-            const duration = v.duration || (libraryVideo ? libraryVideo.duration : null) || v.duration || 0;
+            // Always reconstruct URL from current API_BASE and filename, or use library URL if it's a blob URL
+            // This ensures URLs work across different environments (localhost vs production)
+            let videoUrl = null;
+            if (libraryVideo && libraryVideo.url) {
+              // If library has a blob URL (local video), use it; otherwise reconstruct from API_BASE
+              if (libraryVideo.url.startsWith('blob:')) {
+                videoUrl = libraryVideo.url;
+              } else {
+                videoUrl = `${API_BASE}/videos/${v.filename}`;
+              }
+            } else if (v.filename) {
+              // Always reconstruct from API_BASE - don't trust saved URLs
+              videoUrl = `${API_BASE}/videos/${v.filename}`;
+            }
+            
+            // Use duration from saved show, library cache, or video metadata cache
+            // Prefer cached duration for faster loading, but verify it's still valid
+            let duration = 0;
+            
+            // Try saved show duration first
+            if (v.duration && v.duration > 0) {
+              duration = v.duration;
+            } 
+            // Try library video duration
+            else if (libraryVideo && libraryVideo.duration && libraryVideo.duration > 0) {
+              duration = libraryVideo.duration;
+            }
+            // Try video metadata cache (separate cache for quick lookup)
+            else {
+              try {
+                const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                const cached = videoMetadataCache[v.filename];
+                if (cached && cached.duration && cached.duration > 0) {
+                  // Use cached duration if it's less than 7 days old
+                  const cacheAge = Date.now() - (cached.cachedAt || 0);
+                  if (cacheAge < 7 * 24 * 60 * 60 * 1000) {
+                    duration = cached.duration;
+                    console.log(`[Show Load] Using cached duration for ${v.filename}: ${duration.toFixed(2)}s`);
+                  }
+                }
+              } catch (err) {
+                console.warn('Failed to read video metadata cache:', err);
+              }
+            }
+            
+            // If duration is still 0, metadata preloader will load it
             
             return {
               ...v,
               url: videoUrl,
-              duration: duration, // Ensure duration is preserved/restored
+              duration: duration, // Use cached duration if available, otherwise 0 (will be loaded)
               // Ensure we have an id
               id: v.id || `${v.filename || 'video'}-${Date.now()}-${Math.random()}`
             };
@@ -3169,8 +2978,15 @@
         setMasterTime(0);
         setIsPlaying(false);
         setCurrentShowName(showName);
+        
+        // Switch to editor view - loading modal will show if videos need metadata
+        // Note: Loading states (loadedVideoIds, readyVideoIds, errorVideoIds) are managed inside ShowEditor component
         setCurrentView('editor');
-        showToast(`Loaded "${showName}"`, 'success');
+        
+        // Show toast after a brief delay to not interfere with loading modal
+        setTimeout(() => {
+          showToast(`Loaded "${showName}"`, 'success');
+        }, 100);
       };
 
       const handleBackToDashboard = () => {
@@ -3230,35 +3046,6 @@
           return;
         }
         
-        // Client-side download: Add video to downloadedVideos map (IndexedDB)
-        const videoId = dl.videoId || extractVideoId(dl.url) || dl.filename?.replace('.mp4', '');
-        if (videoId) {
-          const localUrl = dl.localUrl || await getVideoFromDB(videoId);
-          if (localUrl) {
-            const metadata = await getVideoMetadataFromDB(videoId);
-            setDownloadedVideos(prev => {
-              const newMap = new Map(prev);
-              const filename = `${videoId}.mp4`;
-              newMap.set(filename, {
-                filename: filename,
-                title: dl.title || metadata?.title || `Video ${videoId}`,
-                url: localUrl,
-                sourceUrl: dl.url || `https://www.youtube.com/watch?v=${videoId}`,
-                size: null, // Size not available from IndexedDB
-                duration: metadata?.duration || null,
-                defaultTrimStart: 0,
-                defaultTrimEnd: 0,
-                defaultCropX: 0,
-                defaultCropY: 0,
-                defaultCropWidth: 100,
-                defaultCropHeight: 100,
-                localUrl: true // Flag to indicate it's from IndexedDB
-              });
-              saveLibraryMetadata(newMap);
-              return newMap;
-            });
-          }
-        }
         showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
       };
 
@@ -3416,7 +3203,9 @@
             id: v.id,
             name: v.name,
             filename: v.filename,
-            url: v.url.startsWith('blob:') ? null : v.url,
+            // Don't save URL - it will be reconstructed from API_BASE and filename when loading
+            // This ensures URLs work across different environments (localhost vs production)
+            url: null,
             offset: v.offset,
             duration: v.duration,
             volume: v.volume,
@@ -3472,15 +3261,60 @@
         }
       };
 
-      // Auto-save when editing
+      // Track previous video state to detect actual changes (not just metadata updates)
+      const prevVideosStateRef = React.useRef(null);
+      
+      // Auto-save when editing (debounced, only on actual video property changes)
       React.useEffect(() => {
         if (currentView === 'editor' && currentShowName && videos.length > 0) {
-          const interval = setInterval(() => {
+          // Only auto-save if at least some videos have loaded (have duration > 0)
+          // This prevents saving during the initial metadata loading phase
+          const hasAnyVideosLoaded = videos.some(v => v.duration && v.duration > 0);
+          if (!hasAnyVideosLoaded) {
+            return; // Don't auto-save while no videos have loaded
+          }
+          
+          // Create a serialized state of video properties (excluding duration/url which change on metadata load)
+          const currentVideosState = JSON.stringify(videos.map(v => ({
+            id: v.id,
+            filename: v.filename,
+            offset: v.offset,
+            trimStart: v.trimStart,
+            trimEnd: v.trimEnd,
+            cropX: v.cropX,
+            cropY: v.cropY,
+            cropWidth: v.cropWidth,
+            cropHeight: v.cropHeight,
+            volume: v.volume,
+            color: v.color
+          })).sort((a, b) => a.id.localeCompare(b.id))); // Sort for consistent comparison
+          
+          // Also include totalDuration and zoom in the state
+          const fullState = JSON.stringify({
+            videos: currentVideosState,
+            totalDuration,
+            zoom
+          });
+          
+          // Only save if state actually changed (not just metadata updates)
+          if (fullState === prevVideosStateRef.current) {
+            return; // No actual changes, skip save
+          }
+          
+          // Update ref for next comparison
+          prevVideosStateRef.current = fullState;
+          
+          // Debounce auto-save to prevent excessive API calls
+          const timeoutId = setTimeout(() => {
             saveShow(currentShowName, true);
-          }, 10000);
-          return () => clearInterval(interval);
+          }, 15000); // 15 seconds debounce
+          
+          return () => clearTimeout(timeoutId);
+        } else {
+          // Reset state tracking when leaving editor or no show name
+          prevVideosStateRef.current = null;
         }
-      }, [currentView, currentShowName, videos, totalDuration, zoom]);
+      }, [currentView, currentShowName, videos, totalDuration, zoom, saveShow]);
 
       // Update ref whenever isPlaying changes
       React.useEffect(() => {

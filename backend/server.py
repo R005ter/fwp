@@ -1286,64 +1286,122 @@ def delete_video(filename):
 @app.route("/videos/<filename>")
 def serve_video(filename):
     """Serve a video file from R2 or local storage"""
-    # Check if file exists in R2 first
-    if R2_ENABLED and file_exists_in_r2(filename):
-        # Instead of redirecting (which causes CORS issues), proxy the video through backend
-        # This allows us to add CORS headers
+    # Validate filename
+    if not filename or '/' in filename or '..' in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    
+    # Try R2 first if enabled, but fall back gracefully on any error
+    if R2_ENABLED:
         try:
-            from r2_storage import s3_client, R2_BUCKET_NAME
-            if s3_client and R2_BUCKET_NAME:
-                # Get the object from R2
-                response = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=filename)
-                
-                # Determine content type
-                content_type = response.get('ContentType', 'video/mp4')
-                content_length = response.get('ContentLength')
-                
-                # Stream the video with CORS headers
-                def generate():
-                    for chunk in iter(lambda: response['Body'].read(8192), b''):
-                        yield chunk
-                
-                headers = {
-                    'Content-Type': content_type,
-                    'Accept-Ranges': 'bytes',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Range',
-                }
-                if content_length:
-                    headers['Content-Length'] = str(content_length)
-                
-                # Handle Range requests for video seeking
-                range_header = request.headers.get('Range')
-                if range_header:
-                    # Parse range header (e.g., "bytes=0-1023")
-                    match = re.match(r'bytes=(\d+)-(\d*)', range_header)
-                    if match:
-                        start = int(match.group(1))
-                        end = int(match.group(2)) if match.group(2) else content_length - 1 if content_length else None
+            # Check if file exists in R2 first
+            if file_exists_in_r2(filename):
+                # Instead of redirecting (which causes CORS issues), proxy the video through backend
+                # This allows us to add CORS headers
+                from r2_storage import s3_client, R2_BUCKET_NAME
+                if s3_client and R2_BUCKET_NAME:
+                    try:
+                        # Get the object from R2
+                        response = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=filename)
                         
-                        # Get partial object
-                        range_response = s3_client.get_object(
-                            Bucket=R2_BUCKET_NAME,
-                            Key=filename,
-                            Range=f'bytes={start}-{end}'
-                        )
+                        if not response or 'Body' not in response:
+                            raise ValueError(f"Invalid response from R2 for {filename}")
                         
-                        headers['Content-Range'] = f'bytes {start}-{end}/{content_length}'
-                        headers['Content-Length'] = str(end - start + 1)
-                        headers['HTTP/1.1'] = '206 Partial Content'
+                        # Determine content type and length
+                        # boto3 response is a dict-like object
+                        content_type = response.get('ContentType') or 'video/mp4'
+                        content_length = response.get('ContentLength')
                         
-                        def generate_range():
-                            for chunk in iter(lambda: range_response['Body'].read(8192), b''):
-                                yield chunk
+                        # Log for debugging
+                        print(f"[Video Serve] Serving {filename} from R2: ContentLength={content_length}, ContentType={content_type}")
                         
-                        return Response(generate_range(), 206, headers)
-                
-                return Response(generate(), 200, headers)
+                        # Stream the video with CORS headers
+                        def generate():
+                            try:
+                                body = response['Body']
+                                if not body:
+                                    raise ValueError(f"No body in R2 response for {filename}")
+                                while True:
+                                    chunk = body.read(8192)
+                                    if not chunk:
+                                        break
+                                    yield chunk
+                            except Exception as stream_error:
+                                print(f"✗ Error streaming video {filename}: {stream_error}")
+                                import traceback
+                                traceback.print_exc()
+                                raise
+                        
+                        headers = {
+                            'Content-Type': content_type,
+                            'Accept-Ranges': 'bytes',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                            'Access-Control-Allow-Headers': 'Range',
+                        }
+                        if content_length:
+                            headers['Content-Length'] = str(content_length)
+                        
+                        # Handle Range requests for video seeking
+                        range_header = request.headers.get('Range')
+                        if range_header and content_length:
+                            # Parse range header (e.g., "bytes=0-1023")
+                            match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+                            if match:
+                                start = int(match.group(1))
+                                end = int(match.group(2)) if match.group(2) else content_length - 1
+                                
+                                # Validate range
+                                if start < 0 or start >= content_length:
+                                    # Invalid range - return 416 Range Not Satisfiable
+                                    headers['Content-Range'] = f'bytes */{content_length}'
+                                    return Response('', 416, headers)
+                                
+                                if end >= content_length:
+                                    end = content_length - 1
+                                
+                                if start <= end:
+                                    # Get partial object
+                                    try:
+                                        range_response = s3_client.get_object(
+                                            Bucket=R2_BUCKET_NAME,
+                                            Key=filename,
+                                            Range=f'bytes={start}-{end}'
+                                        )
+                                        
+                                        headers['Content-Range'] = f'bytes {start}-{end}/{content_length}'
+                                        headers['Content-Length'] = str(end - start + 1)
+                                        
+                                        def generate_range():
+                                            try:
+                                                body = range_response['Body']
+                                                while True:
+                                                    chunk = body.read(8192)
+                                                    if not chunk:
+                                                        break
+                                                    yield chunk
+                                            except Exception as stream_error:
+                                                print(f"✗ Error streaming range for {filename}: {stream_error}")
+                                                raise
+                                        
+                                        return Response(generate_range(), 206, headers)
+                                    except Exception as range_error:
+                                        # If range request fails, fall through to return full file
+                                        print(f"⚠ Range request failed for {filename}: {range_error}")
+                            # If range header is invalid, fall through to return full file
+                        
+                        # No range header or invalid range - return full file
+                        return Response(generate(), 200, headers)
+                    except Exception as r2_error:
+                        # Log the error and fall through to local file fallback
+                        print(f"✗ Error getting object from R2 for {filename}: {r2_error}")
+                        raise  # Re-raise to be caught by outer exception handler
         except Exception as e:
-            print(f"✗ Error proxying video from R2: {str(e)}")
+            # Log error but don't fail - fall through to local file fallback
+            error_msg = str(e)
+            if 'SSL' in error_msg or 'UNEXPECTED_EOF' in error_msg:
+                print(f"⚠ R2 SSL error for {filename}, falling back to local storage")
+            else:
+                print(f"✗ Error proxying video from R2: {error_msg}")
             # Fall through to local file fallback
     
     # Fallback to local file if R2 not enabled or file not in R2
@@ -1640,6 +1698,21 @@ def get_shows():
     
     user_id = get_current_user_id()
     shows = get_user_shows(user_id)
+    
+    # Reconstruct video URLs from current server base URL to ensure correct environment
+    # This ensures URLs work across different environments (localhost vs production)
+    base_url = request.url_root.rstrip('/')
+    
+    for show in shows:
+        if 'data' in show and 'videos' in show['data']:
+            for video in show['data']['videos']:
+                # Only reconstruct if we have a filename and the URL is None or not a blob URL
+                video_url = video.get('url')
+                if video.get('filename'):
+                    # Reconstruct URL if it's None or not a blob URL
+                    if video_url is None or (isinstance(video_url, str) and not video_url.startswith('blob:')):
+                        video['url'] = f"{base_url}/videos/{video['filename']}"
+    
     return jsonify(shows)
 
 
