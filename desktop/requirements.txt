@@ -1,0 +1,9 @@
+pywebview>=5.0
+yt-dlp>=2025.1.1
+requests~=2.31
+# imageio-ffmpeg bundles a static ffmpeg binary inside the wheel, so the
+# packaged app doesn't depend on the user installing ffmpeg separately.
+imageio-ffmpeg~=0.5
+# pyinstaller and pyinstaller-hooks-contrib are dev dependencies; install
+# before building binaries:
+#   pip install pyinstaller pyinstaller-hooks-contrib

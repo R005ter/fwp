@@ -18,11 +18,12 @@ from flask_cors import CORS
 from authlib.integrations.flask_client import OAuth
 from database import (
     init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth, get_db,
-    save_show, get_user_shows, delete_show,
+    save_show, get_user_shows, get_all_shows_with_creators, delete_show,
     save_library_metadata, get_user_library, delete_library_item,
     get_video_by_youtube_url, get_video_by_filename, create_video,
     add_video_to_library, remove_video_from_library,
-    get_video_reference_count, cleanup_orphaned_videos
+    get_video_reference_count, cleanup_orphaned_videos,
+    create_auth_token, get_auth_token, delete_auth_token,
 )
 from r2_storage import (
     upload_to_r2, delete_from_r2, get_r2_url, file_exists_in_r2,
@@ -32,19 +33,66 @@ from r2_storage import (
 # Load environment variables from .env file
 load_dotenv()
 
-app = Flask(__name__, static_folder='../frontend', static_url_path='')
-# Use environment variable for secret key in production, generate random one for dev
-app.secret_key = os.environ.get('SECRET_KEY') or ('dev-secret-key-' + str(uuid.uuid4()))
+app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
 
-# CORS configuration - allow localhost for local client
-# In production (Render), allow all origins. For local client, explicitly allow localhost.
-cors_origins = ['http://localhost:8080', 'http://localhost:3000', 'http://127.0.0.1:8080']
-if os.environ.get('RENDER') == 'true':
-    # Production: allow all origins (or specify your domain)
-    CORS(app, supports_credentials=True, origins='*')
+IS_RENDER = os.environ.get('RENDER') == 'true'
+
+
+def _parse_admin_ids():
+    """Parse ADMIN_USER_IDS env var (comma-separated integer user IDs)."""
+    raw = os.environ.get('ADMIN_USER_IDS', '').strip()
+    if not raw:
+        return set()
+    try:
+        return {int(x.strip()) for x in raw.split(',') if x.strip()}
+    except ValueError:
+        print(f'⚠ ADMIN_USER_IDS contains non-integer values: {raw!r}')
+        return set()
+
+
+ADMIN_USER_IDS = _parse_admin_ids()
+if ADMIN_USER_IDS:
+    print(f'✓ Admin users: {sorted(ADMIN_USER_IDS)}')
+
+
+def is_admin(user_id):
+    return user_id is not None and user_id in ADMIN_USER_IDS
+
+# SECRET_KEY: in production, refuse to boot without it — sessions signed with a
+# random per-restart key would log every user out on every container restart.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    if IS_RENDER:
+        raise RuntimeError(
+            'SECRET_KEY environment variable is required in production. '
+            'Set it in the Render dashboard → Environment tab.'
+        )
+    _secret_key = 'dev-secret-key-' + str(uuid.uuid4())
+    print('⚠ Using ephemeral SECRET_KEY (dev mode). Sessions reset on restart.')
+app.secret_key = _secret_key
+
+# CORS: locally allow common dev origins. In production restrict to ALLOWED_ORIGINS
+# (comma-separated list). The Flask backend serves the frontend on the same origin
+# in prod, so wide-open CORS is unnecessary and risky.
+_default_dev_origins = [
+    'http://localhost:5050',
+    'http://127.0.0.1:5050',
+    'http://localhost:5173',
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'http://127.0.0.1:8080',
+]
+if IS_RENDER:
+    _allowed = os.environ.get('ALLOWED_ORIGINS', '').strip()
+    if _allowed:
+        cors_origins = [o.strip() for o in _allowed.split(',') if o.strip()]
+    else:
+        # Backend serves frontend from the same origin — same-origin requests
+        # don't need CORS at all. Empty list = no cross-origin allowed.
+        cors_origins = []
 else:
-    # Development/local: allow localhost origins
-    CORS(app, supports_credentials=True, origins=cors_origins)
+    cors_origins = _default_dev_origins
+CORS(app, supports_credentials=True, origins=cors_origins)
 
 # Initialize OAuth
 oauth = OAuth(app)
@@ -328,21 +376,14 @@ def require_auth():
     """Check if user is authenticated - supports both session cookies and auth tokens"""
     user_id = get_current_user_id()
     
-    # If no session, try auth token from header
+    # If no session, try auth token from header (desktop / local-client mode)
     if not user_id:
         auth_token = request.headers.get('X-Auth-Token')
-        if auth_token and hasattr(app, 'auth_tokens') and auth_token in app.auth_tokens:
-            import time
-            token_data = app.auth_tokens[auth_token]
-            # Check if token expired
-            if time.time() < token_data['expires']:
-                # Set user_id in session for this request (temporary)
-                session['user_id'] = token_data['user_id']
-                user_id = token_data['user_id']
-            else:
-                # Token expired, remove it
-                del app.auth_tokens[auth_token]
-    
+        token_user_id = get_auth_token(auth_token)
+        if token_user_id:
+            session['user_id'] = token_user_id  # cache in session for this request
+            user_id = token_user_id
+
     if not user_id:
         return jsonify({"error": "Authentication required"}), 401
     return None
@@ -1031,8 +1072,14 @@ def upload_video():
     if 'user_id' in session:
         user_id = session.get('user_id')
         print(f"[upload] User authenticated via session: {user_id}")
+    # Then try X-Auth-Token (desktop / mini-app)
+    elif request.headers.get('X-Auth-Token'):
+        token_user_id = get_auth_token(request.headers.get('X-Auth-Token'))
+        if token_user_id:
+            user_id = token_user_id
+            print(f"[upload] User authenticated via X-Auth-Token: {user_id}")
     # Otherwise, try OAuth matching first (preferred for cross-instance sync)
-    elif request.form.get('oauth_provider') and request.form.get('oauth_id'):
+    if not user_id and request.form.get('oauth_provider') and request.form.get('oauth_id'):
         oauth_provider = request.form.get('oauth_provider')
         oauth_id = request.form.get('oauth_id')
         print(f"[upload] OAuth matching: {oauth_provider}/{oauth_id}")
@@ -1045,7 +1092,7 @@ def upload_video():
         else:
             return jsonify({"error": f"User not found with OAuth {oauth_provider}/{oauth_id}. Please log in first on this server."}), 404
     # Fallback to user_id from form data (for backward compatibility)
-    elif request.form.get('user_id'):
+    if not user_id and request.form.get('user_id'):
         user_id = int(request.form.get('user_id'))
         print(f"[upload] User ID from form data (fallback): {user_id}")
         # Verify user exists in database
@@ -1485,18 +1532,10 @@ def get_current_user():
     # Try to get user_id from session first (web client)
     user_id = get_current_user_id()
     
-    # If no session, try auth token (local client)
+    # If no session, try auth token (desktop / local-client mode)
     if not user_id:
         auth_token = request.args.get('token') or request.headers.get('X-Auth-Token')
-        if auth_token and hasattr(app, 'auth_tokens') and auth_token in app.auth_tokens:
-            import time
-            token_data = app.auth_tokens[auth_token]
-            # Check if token expired
-            if time.time() < token_data['expires']:
-                user_id = token_data['user_id']
-            else:
-                # Token expired, remove it
-                del app.auth_tokens[auth_token]
+        user_id = get_auth_token(auth_token)
     
     if not user_id:
         return jsonify({"authenticated": False}), 200
@@ -1507,6 +1546,7 @@ def get_current_user():
         from database import get_user_youtube_cookies
         has_cookies = get_user_youtube_cookies(user_id) is not None
         user["has_youtube_cookies"] = has_cookies
+        user["is_admin"] = is_admin(user_id)
         return jsonify({"authenticated": True, "user": user})
     else:
         session.clear()
@@ -1557,44 +1597,77 @@ def get_user_cookies_status():
 
 @app.route("/api/auth/google", methods=["GET"])
 def google_login():
-    """Initiate Google OAuth login"""
-    # Get frontend URL for error redirects
+    """Initiate Google OAuth login.
+
+    Supports two flows:
+    - Web: pass ?frontend_url=... — server redirects back with token in URL hash.
+    - Desktop: pass ?desktop_callback=http://127.0.0.1:PORT/oauth-callback&state=XYZ
+      — after OAuth the server redirects to that callback with token+state in
+      the query string. (Hash fragments don't reach a localhost HTTP listener.)
+    """
+    desktop_callback = request.args.get('desktop_callback')
+    desktop_state = request.args.get('state', '')
+
+    # Resolve a frontend URL for error-redirect targets
     frontend_url = request.args.get('frontend_url') or request.headers.get('Referer')
     if frontend_url:
         try:
             parsed = urlparse(frontend_url)
             frontend_origin = f"{parsed.scheme}://{parsed.netloc}"
-        except:
+        except Exception:
             frontend_origin = request.url_root.rstrip('/')
     else:
         frontend_origin = request.url_root.rstrip('/')
-    
+
     if not google:
-        # Redirect to frontend with error instead of returning JSON
+        if desktop_callback:
+            return redirect(f"{desktop_callback}?error=oauth_not_configured")
         return redirect(f"{frontend_origin}#/login?error=oauth_not_configured")
-    
-    # Store the frontend URL in session for redirect after OAuth
-    session['oauth_frontend_url'] = frontend_origin
-    
+
+    # Validate desktop_callback to prevent open-redirect to arbitrary hosts.
+    if desktop_callback:
+        try:
+            parsed = urlparse(desktop_callback)
+            if parsed.hostname not in ('127.0.0.1', 'localhost'):
+                return jsonify({"error": "desktop_callback must be a loopback URL"}), 400
+        except Exception:
+            return jsonify({"error": "invalid desktop_callback"}), 400
+        session['oauth_desktop_callback'] = desktop_callback
+        session['oauth_desktop_state'] = desktop_state
+        # Also stash a sane error-redirect target.
+        session['oauth_frontend_url'] = frontend_origin
+    else:
+        session.pop('oauth_desktop_callback', None)
+        session.pop('oauth_desktop_state', None)
+        session['oauth_frontend_url'] = frontend_origin
+
     try:
-        # Build redirect URI dynamically based on current request
         redirect_uri = url_for('google_callback', _external=True)
         return google.authorize_redirect(redirect_uri)
     except Exception as e:
         print(f"OAuth redirect error: {str(e)}")
         import traceback
         traceback.print_exc()
+        if desktop_callback:
+            return redirect(f"{desktop_callback}?error=oauth_error")
         return redirect(f"{frontend_origin}#/login?error=oauth_error")
 
 
 @app.route("/api/auth/google/callback", methods=["GET"])
 def google_callback():
-    """Handle Google OAuth callback"""
-    # Get frontend URL from session (set during login initiation)
+    """Handle Google OAuth callback (web + desktop)."""
     frontend_url = session.pop('oauth_frontend_url', None) or request.url_root.rstrip('/')
-    
+    desktop_callback = session.pop('oauth_desktop_callback', None)
+    desktop_state = session.pop('oauth_desktop_state', '')
+
+    def err(code):
+        if desktop_callback:
+            sep = '&' if '?' in desktop_callback else '?'
+            return redirect(f"{desktop_callback}{sep}error={code}")
+        return redirect(f"{frontend_url}#/login?error={code}")
+
     if not google:
-        return redirect(f"{frontend_url}#/login?error=oauth_not_configured")
+        return err('oauth_not_configured')
     
     try:
         token = google.authorize_access_token()
@@ -1607,18 +1680,16 @@ def google_callback():
         )
         
         if user_info_response.status_code != 200:
-            return redirect(f"{frontend_url}#/login?error=oauth_failed")
-        
+            return err('oauth_failed')
+
         user_info = user_info_response.json()
-        
-        # Extract user information
+
         google_id = user_info.get('id') or user_info.get('sub')
         email = user_info.get('email')
         name = user_info.get('name') or (email.split('@')[0] if email else 'user')
-        picture = user_info.get('picture')
-        
+
         if not google_id:
-            return redirect(f"{frontend_url}#/login?error=oauth_failed")
+            return err('oauth_failed')
         
         # Check if user already exists
         user = get_user_by_oauth('google', google_id)
@@ -1646,43 +1717,41 @@ def google_callback():
                     print(f"User already exists with this Google ID, using existing account")
                     user = existing_oauth
                 else:
-                    return redirect(f"{frontend_url}#/login?error=user_creation_failed")
-        
-        # Set session (for web client)
+                    return err('user_creation_failed')
+
+        # Web flows still get a session cookie.
         session['user_id'] = user['id']
         session['username'] = user['username']
-        
-        # For local client: generate auth token and include in redirect URL
-        # Check if this is a local client request (localhost origin)
-        is_local_client = 'localhost' in frontend_url or '127.0.0.1' in frontend_url
-        
-        if is_local_client:
-            # Generate a simple auth token (user_id + timestamp hash)
-            import hashlib
-            import time
-            token_data = f"{user['id']}:{time.time()}"
-            auth_token = hashlib.sha256(f"{token_data}:{app.secret_key}".encode()).hexdigest()[:32]
-            
-            # Store token temporarily (could use Redis in production, but for now use a simple dict)
-            if not hasattr(app, 'auth_tokens'):
-                app.auth_tokens = {}
-            app.auth_tokens[auth_token] = {
-                'user_id': user['id'],
-                'username': user['username'],
-                'expires': time.time() + 86400  # 24 hours
-            }
-            
-            # Redirect with token in URL
+
+        # Mint a persistent token for desktop / legacy local-client redirects.
+        # (Web flows ignore it — they just use the session cookie.)
+        is_loopback = (
+            desktop_callback is not None
+            or 'localhost' in frontend_url
+            or '127.0.0.1' in frontend_url
+        )
+
+        if is_loopback:
+            import secrets as _secrets
+            auth_token = _secrets.token_urlsafe(32)
+            create_auth_token(auth_token, user['id'], ttl_seconds=86400)
+
+            if desktop_callback:
+                sep = '&' if '?' in desktop_callback else '?'
+                return redirect(
+                    f"{desktop_callback}{sep}token={auth_token}&state={desktop_state}"
+                )
+            # Legacy SPA local-client at localhost:8080 (hash-based router)
             return redirect(f"{frontend_url}#/dashboard?token={auth_token}")
         else:
             # Web client: normal session-based redirect
             return redirect(f"{frontend_url}#/dashboard")
-        
+
     except Exception as e:
         print(f"Google OAuth error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return redirect(f"{frontend_url}#/login?error=oauth_error")
+        return err('oauth_error')
 
 
 # ======================
@@ -1691,28 +1760,31 @@ def google_callback():
 
 @app.route("/api/shows", methods=["GET"])
 def get_shows():
-    """Get all shows for current user"""
+    """Get shows. Admins see all shows (with creator info); everyone else sees their own."""
     auth_error = require_auth()
     if auth_error:
         return auth_error
-    
+
     user_id = get_current_user_id()
-    shows = get_user_shows(user_id)
-    
-    # Reconstruct video URLs from current server base URL to ensure correct environment
-    # This ensures URLs work across different environments (localhost vs production)
+    if is_admin(user_id):
+        shows = get_all_shows_with_creators()
+    else:
+        shows = get_user_shows(user_id)
+        for show in shows:
+            # Non-admin GET still gets their own user_id stamped so the frontend
+            # can pass it through to delete/edit calls uniformly.
+            show.setdefault('user_id', user_id)
+
+    # Reconstruct video URLs from current server base URL.
     base_url = request.url_root.rstrip('/')
-    
     for show in shows:
         if 'data' in show and 'videos' in show['data']:
             for video in show['data']['videos']:
-                # Only reconstruct if we have a filename and the URL is None or not a blob URL
                 video_url = video.get('url')
                 if video.get('filename'):
-                    # Reconstruct URL if it's None or not a blob URL
                     if video_url is None or (isinstance(video_url, str) and not video_url.startswith('blob:')):
                         video['url'] = f"{base_url}/videos/{video['filename']}"
-    
+
     return jsonify(shows)
 
 
@@ -1737,17 +1809,24 @@ def save_show_endpoint():
 
 @app.route("/api/shows/<show_name>", methods=["DELETE"])
 def delete_show_endpoint(show_name):
-    """Delete a show"""
+    """Delete a show. Admins may delete another user's show by passing ?user_id=N."""
     auth_error = require_auth()
     if auth_error:
         return auth_error
-    
+
     user_id = get_current_user_id()
-    deleted = delete_show(user_id, show_name)
+    target_user_id = request.args.get('user_id', type=int)
+
+    if target_user_id and target_user_id != user_id:
+        if not is_admin(user_id):
+            return jsonify({"error": "Not authorized"}), 403
+        deleted = delete_show(target_user_id, show_name)
+    else:
+        deleted = delete_show(user_id, show_name)
+
     if deleted:
         return jsonify({"success": True})
-    else:
-        return jsonify({"error": "Show not found"}), 404
+    return jsonify({"error": "Show not found"}), 404
 
 
 @app.route("/api/library", methods=["GET"])
@@ -1884,6 +1963,53 @@ def debug_downloads():
         "downloads": user_downloads,
         "library_count": len(user_library),
         "library_files": list(user_library.keys())
+    })
+
+
+@app.route("/api/desktop/releases")
+def desktop_releases():
+    """Return latest desktop-app download URLs. Admin-only.
+
+    Pulls from the GitHub repo's `latest` release. The URLs follow the
+    naming convention `fwp-desktop-<os>-<arch>.<ext>` produced by the CI
+    workflow at .github/workflows/build-desktop.yml. If the repo has no
+    release yet, returns the placeholder URLs anyway so the UI can render.
+    """
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+    user_id = get_current_user_id()
+    if not is_admin(user_id):
+        return jsonify({"error": "Not authorized"}), 403
+
+    repo = os.environ.get('GITHUB_REPO', 'R005ter/fwp')
+    base = f'https://github.com/{repo}/releases/latest/download'
+    return jsonify({
+        "repo": repo,
+        "platforms": [
+            {
+                "os": "windows",
+                "label": "Windows",
+                "filename": "fwp-desktop-windows.exe",
+                "url": f"{base}/fwp-desktop-windows.exe",
+                "note": "Double-click to run. ffmpeg is bundled.",
+            },
+            {
+                "os": "mac",
+                "label": "macOS",
+                "filename": "fwp-desktop-mac.zip",
+                "url": f"{base}/fwp-desktop-mac.zip",
+                "note": "Unzip, then right-click → Open the first time (Gatekeeper).",
+            },
+            {
+                "os": "linux",
+                "label": "Linux",
+                "filename": "fwp-desktop-linux",
+                "url": f"{base}/fwp-desktop-linux",
+                "note": "chmod +x fwp-desktop-linux && ./fwp-desktop-linux",
+            },
+        ],
+        "source_url": f"https://github.com/{repo}",
     })
 
 

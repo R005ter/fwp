@@ -1,596 +1,806 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React from 'react';
+import { API_BASE } from './api.js';
+import LoginView from './components/LoginView.jsx';
+import Dashboard from './components/Dashboard.jsx';
+import LibraryView from './components/LibraryView.jsx';
+import ShowEditor from './components/ShowEditor.jsx';
 
-const API_BASE = 'http://localhost:5000';
+const TOAST_BG = {
+  error: 'bg-red-600',
+  success: 'bg-green-600',
+  warning: 'bg-yellow-600',
+  info: 'bg-blue-600',
+};
+const TOAST_ICON = {
+  error: '❌',
+  success: '✅',
+  warning: '⚠️',
+  info: 'ℹ️',
+};
 
 const FireworksPlanner = () => {
-  const [videos, setVideos] = useState([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [masterTime, setMasterTime] = useState(0);
-  const [totalDuration, setTotalDuration] = useState(60);
-  const [zoom, setZoom] = useState(1);
-  const [draggingId, setDraggingId] = useState(null);
-  const [dragStartX, setDragStartX] = useState(0);
-  const [dragStartOffset, setDragStartOffset] = useState(0);
-  
-  // YouTube download state
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [downloading, setDownloading] = useState([]);
-  const [backendStatus, setBackendStatus] = useState(null);
-  const [showDownloader, setShowDownloader] = useState(false);
-  
-  const videoRefs = useRef({});
-  const timelineRef = useRef(null);
-  const animationRef = useRef(null);
-  const lastTimeRef = useRef(Date.now());
+  const [authenticated, setAuthenticated] = React.useState(false);
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [checkingAuth, setCheckingAuth] = React.useState(true);
 
-  // Check backend health on mount
-  useEffect(() => {
-    fetch(`${API_BASE}/api/health`)
-      .then(res => res.json())
-      .then(data => setBackendStatus(data))
-      .catch(() => setBackendStatus({ status: 'offline' }));
-    
-    // Load existing videos
-    loadVideosFromServer();
+  const [currentView, setCurrentView] = React.useState('dashboard');
+  const [currentShowName, setCurrentShowName] = React.useState(null);
+
+  const [videos, setVideos] = React.useState([]);
+  const [downloadedVideos, setDownloadedVideos] = React.useState(new Map());
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [masterTime, setMasterTime] = React.useState(0);
+  const [totalDuration, setTotalDuration] = React.useState(60);
+  const [zoom, setZoom] = React.useState(1);
+  const [draggingId, setDraggingId] = React.useState(null);
+  const [dragStartX, setDragStartX] = React.useState(0);
+  const [dragStartOffset, setDragStartOffset] = React.useState(0);
+
+  const [savedSessions, setSavedSessions] = React.useState([]);
+  const [gridHeight, setGridHeight] = React.useState(400);
+  const [toasts, setToasts] = React.useState([]);
+
+  const videoRefs = React.useRef({});
+  const timelineRef = React.useRef(null);
+  const animationRef = React.useRef(null);
+  const lastTimeRef = React.useRef(Date.now());
+  const isPlayingRef = React.useRef(false);
+
+  const showToast = React.useCallback((message, type = 'info') => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
   }, []);
 
-  const loadVideosFromServer = async () => {
+  // ---------- Auth ----------
+  const checkAuth = React.useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/videos`);
-      const serverVideos = await res.json();
-      // Don't replace, just make available - user can add from library
-    } catch (err) {
-      console.error('Failed to load videos:', err);
-    }
-  };
-
-  // Poll download progress
-  useEffect(() => {
-    if (downloading.length === 0) return;
-    
-    const interval = setInterval(async () => {
-      const updates = await Promise.all(
-        downloading.map(async (dl) => {
-          try {
-            const res = await fetch(`${API_BASE}/api/download/${dl.id}`);
-            const status = await res.json();
-            return { ...dl, ...status };
-          } catch {
-            return dl;
-          }
-        })
-      );
-      
-      setDownloading(updates.filter(dl => dl.status === 'downloading'));
-      
-      // Add completed downloads to videos
-      updates
-        .filter(dl => dl.status === 'complete' && dl.filename)
-        .forEach(dl => {
-          if (!videos.find(v => v.filename === dl.filename)) {
-            addVideoToTimeline({
-              id: dl.id,
-              name: dl.title || dl.filename,
-              filename: dl.filename,
-              url: `${API_BASE}/videos/${dl.filename}`,
-            });
-          }
-        });
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [downloading, videos]);
-
-  const addVideoToTimeline = (videoData) => {
-    const newVideo = {
-      id: videoData.id || Date.now().toString(),
-      name: videoData.name,
-      filename: videoData.filename,
-      url: videoData.url,
-      offset: 0,
-      duration: 0,
-      volume: 0.5,
-      color: `hsl(${videos.length * 60}, 70%, 50%)`
-    };
-    setVideos(prev => [...prev, newVideo]);
-  };
-
-  const handleYoutubeDownload = async () => {
-    if (!youtubeUrl.trim()) return;
-    
-    try {
-      const res = await fetch(`${API_BASE}/api/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: youtubeUrl })
-      });
-      
+      const res = await fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' });
       const data = await res.json();
-      
-      if (data.error) {
-        alert(data.error);
+      if (data.authenticated && data.user) {
+        setAuthenticated(true);
+        setCurrentUser(data.user);
+        const hash = window.location.hash;
+        if (hash.includes('#/dashboard') || hash.includes('error=')) {
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname + '#/dashboard',
+          );
+        }
+      } else {
+        setAuthenticated(false);
+        setCurrentUser(null);
+      }
+    } catch (err) {
+      console.error('Auth check failed:', err);
+      setAuthenticated(false);
+    } finally {
+      setCheckingAuth(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  const handleLogin = (user) => {
+    setAuthenticated(true);
+    setCurrentUser(user);
+    showToast(`Welcome, ${user.username}!`, 'success');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setAuthenticated(false);
+    setCurrentUser(null);
+    setSavedSessions([]);
+    setDownloadedVideos(new Map());
+    setVideos([]);
+    setCurrentView('dashboard');
+    showToast('Logged out', 'info');
+  };
+
+  // ---------- Server data ----------
+  const loadSessionsList = React.useCallback(async () => {
+    if (!authenticated) {
+      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+      setSavedSessions(sessions);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/shows`, { credentials: 'include' });
+      if (!res.ok) {
+        setSavedSessions([]);
         return;
       }
-      
-      setDownloading(prev => [...prev, { 
-        id: data.id, 
-        url: youtubeUrl, 
-        status: 'downloading',
-        progress: 0 
-      }]);
-      setYoutubeUrl('');
+      const sessions = await res.json();
+      setSavedSessions(
+        sessions.map((s) => ({
+          name: s.name,
+          timestamp: s.timestamp,
+          totalDuration: s.data.totalDuration || 60,
+          zoom: s.data.zoom || 1,
+          videos: s.data.videos || [],
+          user_id: s.user_id,
+          creator_username: s.creator_username,
+          creator_email: s.creator_email,
+        })),
+      );
     } catch (err) {
-      alert('Failed to start download. Is the backend running?');
+      console.error('Failed to load shows from server:', err);
+      setSavedSessions([]);
+    }
+  }, [authenticated]);
+
+  const loadAvailableVideos = React.useCallback(async () => {
+    const videoMap = new Map();
+    if (!authenticated) {
+      setDownloadedVideos(videoMap);
+      return;
+    }
+    try {
+      const videosRes = await fetch(`${API_BASE}/api/videos`, { credentials: 'include' });
+      if (!videosRes.ok) {
+        setDownloadedVideos(videoMap);
+        return;
+      }
+      const serverVideos = await videosRes.json();
+
+      let serverLibrary = {};
+      try {
+        const libraryRes = await fetch(`${API_BASE}/api/library`, { credentials: 'include' });
+        if (libraryRes.ok) serverLibrary = await libraryRes.json();
+      } catch (e) {
+        console.warn('Failed to load library from server:', e);
+      }
+
+      serverVideos.forEach((video) => {
+        if (videoMap.has(video.filename)) return;
+        const savedData = serverLibrary[video.filename] || {};
+        videoMap.set(video.filename, {
+          filename: video.filename,
+          title: savedData.title || video.title || video.filename,
+          url: `${API_BASE}/videos/${video.filename}`,
+          sourceUrl: savedData.sourceUrl || null,
+          size: video.size,
+          duration: savedData.duration || video.duration || null,
+          defaultTrimStart: savedData.defaultTrimStart || 0,
+          defaultTrimEnd: savedData.defaultTrimEnd || 0,
+          defaultCropX: savedData.defaultCropX || 0,
+          defaultCropY: savedData.defaultCropY || 0,
+          defaultCropWidth: savedData.defaultCropWidth || 100,
+          defaultCropHeight: savedData.defaultCropHeight || 100,
+        });
+      });
+    } catch (err) {
+      console.warn('Failed to load videos from server:', err);
+    }
+    setDownloadedVideos(videoMap);
+  }, [authenticated]);
+
+  React.useEffect(() => {
+    if (!authenticated) return;
+    loadSessionsList();
+    loadAvailableVideos();
+    const savedGridHeight = localStorage.getItem('fwp_gridHeight');
+    if (savedGridHeight) setGridHeight(parseInt(savedGridHeight, 10));
+  }, [authenticated, loadSessionsList, loadAvailableVideos]);
+
+  React.useEffect(() => {
+    if (authenticated && currentView === 'dashboard') loadAvailableVideos();
+  }, [currentView, authenticated, loadAvailableVideos]);
+
+  // ---------- Library mutations ----------
+  const saveLibraryMetadata = async (videosMap) => {
+    const libraryData = {};
+    videosMap.forEach((video, filename) => {
+      libraryData[filename] = {
+        title: video.title,
+        sourceUrl: video.sourceUrl,
+        duration: video.duration,
+        defaultTrimStart: video.defaultTrimStart || 0,
+        defaultTrimEnd: video.defaultTrimEnd || 0,
+        defaultCropX: video.defaultCropX || 0,
+        defaultCropY: video.defaultCropY || 0,
+        defaultCropWidth: video.defaultCropWidth || 100,
+        defaultCropHeight: video.defaultCropHeight || 100,
+      };
+    });
+    localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+    if (!authenticated) return;
+    try {
+      for (const [filename, metadata] of Object.entries(libraryData)) {
+        await fetch(`${API_BASE}/api/library`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ filename, metadata }),
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to sync library to server:', err);
     }
   };
 
-  // File input handler for local files
-  const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files);
-    const newVideos = files.map((file, index) => ({
-      id: Date.now() + index,
-      name: file.name.replace(/\.[^/.]+$/, ''),
-      url: URL.createObjectURL(file),
-      offset: 0,
-      duration: 0,
-      volume: 0.5,
-      color: `hsl(${(videos.length + index) * 60}, 70%, 50%)`
-    }));
-    setVideos(prev => [...prev, ...newVideos]);
+  const handleNewShow = () => {
+    setCurrentShowName(null);
+    setVideos([]);
+    setMasterTime(0);
+    setTotalDuration(60);
+    setZoom(1);
+    setIsPlaying(false);
+    setCurrentView('editor');
   };
 
-  // Update video duration once loaded
-  const handleVideoLoaded = (id, duration) => {
-    setVideos(prev => {
-      const updated = prev.map(v => 
-        v.id === id ? { ...v, duration } : v
-      );
-      const maxEnd = Math.max(...updated.map(v => v.offset + v.duration));
-      if (maxEnd > totalDuration) {
-        setTotalDuration(maxEnd + 10);
+  const handleEditShow = async (showName, ownerUserId = null) => {
+    let session = null;
+    if (authenticated) {
+      try {
+        const res = await fetch(`${API_BASE}/api/shows`, { credentials: 'include' });
+        if (res.ok) {
+          const shows = await res.json();
+          // Disambiguate by user_id when the caller knows it (admins viewing
+          // someone else's show); otherwise fall back to name match.
+          const found = shows.find((s) =>
+            ownerUserId != null
+              ? s.name === showName && s.user_id === ownerUserId
+              : s.name === showName,
+          );
+          if (found) {
+            session = {
+              name: found.name,
+              timestamp: found.timestamp,
+              totalDuration: found.data.totalDuration || 60,
+              zoom: found.data.zoom || 1,
+              videos: found.data.videos || [],
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load show from server:', err);
       }
-      return updated;
+    }
+    if (!session) {
+      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+      session = sessions.find((s) => s.name === showName);
+    }
+    if (!session) {
+      showToast('Session not found', 'error');
+      return;
+    }
+
+    videos.forEach((v) => {
+      if (v.url && v.url.startsWith('blob:')) URL.revokeObjectURL(v.url);
     });
+    Object.keys(videoRefs.current).forEach((key) => delete videoRefs.current[key]);
+
+    const restoredVideos = session.videos
+      .filter((v) => v.filename)
+      .map((v) => {
+        const libraryVideo = downloadedVideos.get(v.filename);
+        let videoUrl = null;
+        if (libraryVideo && libraryVideo.url) {
+          videoUrl = libraryVideo.url.startsWith('blob:')
+            ? libraryVideo.url
+            : `${API_BASE}/videos/${v.filename}`;
+        } else if (v.filename) {
+          videoUrl = `${API_BASE}/videos/${v.filename}`;
+        }
+
+        let duration = 0;
+        if (v.duration && v.duration > 0) {
+          duration = v.duration;
+        } else if (libraryVideo && libraryVideo.duration && libraryVideo.duration > 0) {
+          duration = libraryVideo.duration;
+        } else {
+          try {
+            const cache = JSON.parse(
+              localStorage.getItem('fwp_video_metadata_cache') || '{}',
+            );
+            const cached = cache[v.filename];
+            if (cached && cached.duration && cached.duration > 0) {
+              const cacheAge = Date.now() - (cached.cachedAt || 0);
+              if (cacheAge < 7 * 24 * 60 * 60 * 1000) duration = cached.duration;
+            }
+          } catch (err) {
+            console.warn('Failed to read video metadata cache:', err);
+          }
+        }
+
+        return {
+          ...v,
+          url: videoUrl,
+          duration,
+          id: v.id || `${v.filename || 'video'}-${Date.now()}-${Math.random()}`,
+        };
+      })
+      .filter((v) => v.url);
+
+    setVideos(restoredVideos);
+    setTotalDuration(session.totalDuration || 60);
+    setZoom(session.zoom || 1);
+    setMasterTime(0);
+    setIsPlaying(false);
+    setCurrentShowName(showName);
+    setCurrentView('editor');
+    setTimeout(() => showToast(`Loaded "${showName}"`, 'success'), 100);
   };
 
-  // Master playback loop
-  useEffect(() => {
-    if (isPlaying) {
+  const handleBackToDashboard = () => {
+    if (currentShowName && videos.length > 0) saveShow(currentShowName, true);
+    setCurrentView('dashboard');
+    setIsPlaying(false);
+    loadSessionsList();
+  };
+
+  const handleGoToLibrary = () => {
+    setCurrentView('library');
+    loadAvailableVideos();
+  };
+
+  const handleBackFromLibrary = () => {
+    setCurrentView('dashboard');
+    loadAvailableVideos();
+  };
+
+  const handleDeleteShow = async (name, ownerUserId = null) => {
+    const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+    localStorage.setItem(
+      'fwp_sessions',
+      JSON.stringify(sessions.filter((s) => s.name !== name)),
+    );
+    if (authenticated) {
+      try {
+        const url = new URL(
+          `${API_BASE}/api/shows/${encodeURIComponent(name)}`,
+        );
+        // Pass user_id when admin is deleting someone else's show; backend
+        // enforces admin-only for cross-user deletes.
+        if (ownerUserId != null && ownerUserId !== currentUser?.id) {
+          url.searchParams.set('user_id', String(ownerUserId));
+        }
+        await fetch(url.toString(), {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+      } catch (err) {
+        console.warn('Failed to delete show from server:', err);
+      }
+    }
+    loadSessionsList();
+    showToast(`Deleted show "${name}"`, 'success');
+  };
+
+  const handleDownloadComplete = async (dl) => {
+    const isServerSideDownload =
+      dl.filename && dl.status === 'complete' && !dl.localUrl && (!dl.videoId || dl.serverSide);
+    if (isServerSideDownload) {
+      setTimeout(async () => {
+        await loadAvailableVideos();
+        showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+      }, 500);
+      return;
+    }
+    showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+  };
+
+  const handleDeleteVideo = async (video) => {
+    try {
+      await fetch(`${API_BASE}/api/videos/${video.filename}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      setDownloadedVideos((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(video.filename);
+        saveLibraryMetadata(newMap);
+        return newMap;
+      });
+      setVideos((prev) => prev.filter((v) => v.filename !== video.filename));
+      showToast(`"${video.title}" deleted`, 'success');
+    } catch (err) {
+      showToast('Failed to delete video: ' + err.message, 'error');
+    }
+  };
+
+  const handleSaveVideoSettings = async (filename, updates) => {
+    setDownloadedVideos((prev) => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(filename);
+      if (!existing) return newMap;
+
+      const updated = { ...existing, ...updates };
+      newMap.set(filename, updated);
+
+      const metadata = {
+        title: updated.title,
+        sourceUrl: updated.sourceUrl,
+        duration: updated.duration,
+        defaultTrimStart: updated.defaultTrimStart || 0,
+        defaultTrimEnd: updated.defaultTrimEnd || 0,
+        defaultCropX: updated.defaultCropX || 0,
+        defaultCropY: updated.defaultCropY || 0,
+        defaultCropWidth: updated.defaultCropWidth || 100,
+        defaultCropHeight: updated.defaultCropHeight || 100,
+      };
+
+      if (authenticated) {
+        fetch(`${API_BASE}/api/library`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ filename, metadata }),
+        })
+          .then((res) => {
+            if (!res.ok) {
+              return res.json().then((err) => {
+                throw new Error(err.error || `Server error: ${res.status}`);
+              });
+            }
+            return res.json();
+          })
+          .catch((err) => {
+            console.error('Failed to save video settings:', err);
+            showToast(`Failed to save settings: ${err.message}`, 'error');
+          });
+      }
+
+      const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+      libraryData[filename] = metadata;
+      localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+      return newMap;
+    });
+    showToast('Video settings saved', 'success');
+  };
+
+  const handleAddFromLibrary = (videoData) => {
+    const initialDuration =
+      videoData.duration && videoData.duration > 0 ? videoData.duration : 0;
+
+    const newInstance = {
+      id: `${videoData.filename}-${Date.now()}`,
+      name: videoData.title || videoData.filename,
+      filename: videoData.filename,
+      url: videoData.url,
+      sourceUrl: videoData.sourceUrl,
+      offset: 0,
+      duration: initialDuration,
+      volume: 1.0,
+      trimStart: videoData.defaultTrimStart || 0,
+      trimEnd: videoData.defaultTrimEnd || 0,
+      cropX: videoData.defaultCropX || 0,
+      cropY: videoData.defaultCropY || 0,
+      cropWidth: videoData.defaultCropWidth || 100,
+      cropHeight: videoData.defaultCropHeight || 100,
+      color: `hsl(${videos.length * 60}, 70%, 50%)`,
+    };
+    setVideos((prev) => [...prev, newInstance]);
+
+    if (!initialDuration && videoData.url) {
+      const tempVideo = document.createElement('video');
+      tempVideo.preload = 'metadata';
+      tempVideo.src = videoData.url;
+      tempVideo.crossOrigin = 'anonymous';
+      tempVideo.addEventListener('loadedmetadata', () => {
+        const duration = tempVideo.duration;
+        if (duration && duration > 0) {
+          setVideos((prev) =>
+            prev.map((v) => (v.id === newInstance.id ? { ...v, duration } : v)),
+          );
+        }
+        tempVideo.remove();
+      });
+      tempVideo.addEventListener('error', () => tempVideo.remove());
+      tempVideo.load();
+    }
+  };
+
+  const saveShow = React.useCallback(
+    async (name, silent = false) => {
+      if (!name || !name.trim()) {
+        if (!silent) showToast('Please enter a show name', 'warning');
+        return;
+      }
+
+      const sessionData = {
+        totalDuration,
+        zoom,
+        videos: videos.map((v) => ({
+          id: v.id,
+          name: v.name,
+          filename: v.filename,
+          url: null, // reconstructed from API_BASE on load
+          offset: v.offset,
+          duration: v.duration,
+          volume: v.volume,
+          trimStart: v.trimStart || 0,
+          trimEnd: v.trimEnd || 0,
+          cropX: v.cropX || 0,
+          cropY: v.cropY || 0,
+          cropWidth: v.cropWidth || 100,
+          cropHeight: v.cropHeight || 100,
+          color: v.color,
+        })),
+      };
+
+      const session = {
+        name: name.trim(),
+        timestamp: new Date().toISOString(),
+        ...sessionData,
+      };
+      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+      const existingIndex = sessions.findIndex((s) => s.name === name.trim());
+      if (existingIndex >= 0) sessions[existingIndex] = session;
+      else sessions.push(session);
+      localStorage.setItem('fwp_sessions', JSON.stringify(sessions));
+      localStorage.setItem('fwp_lastSession', name.trim());
+
+      if (authenticated) {
+        try {
+          await fetch(`${API_BASE}/api/shows`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ name: name.trim(), data: sessionData }),
+          });
+        } catch (err) {
+          console.warn('Failed to sync show to server:', err);
+        }
+      }
+
+      loadSessionsList();
+      setCurrentShowName(name.trim());
+      if (!silent) showToast(`Show "${name.trim()}" saved!`, 'success');
+    },
+    [
+      totalDuration,
+      zoom,
+      videos,
+      authenticated,
+      loadSessionsList,
+      showToast,
+    ],
+  );
+
+  // Auto-save (debounced)
+  const prevVideosStateRef = React.useRef(null);
+  React.useEffect(() => {
+    if (currentView !== 'editor' || !currentShowName || videos.length === 0) {
+      prevVideosStateRef.current = null;
+      return;
+    }
+    const hasAnyVideosLoaded = videos.some((v) => v.duration && v.duration > 0);
+    if (!hasAnyVideosLoaded) return;
+
+    const currentVideosState = JSON.stringify(
+      videos
+        .map((v) => ({
+          id: v.id,
+          filename: v.filename,
+          offset: v.offset,
+          trimStart: v.trimStart,
+          trimEnd: v.trimEnd,
+          cropX: v.cropX,
+          cropY: v.cropY,
+          cropWidth: v.cropWidth,
+          cropHeight: v.cropHeight,
+          volume: v.volume,
+          color: v.color,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    );
+
+    const fullState = JSON.stringify({ videos: currentVideosState, totalDuration, zoom });
+    if (fullState === prevVideosStateRef.current) return;
+    prevVideosStateRef.current = fullState;
+
+    const timeoutId = setTimeout(() => saveShow(currentShowName, true), 15000);
+    return () => clearTimeout(timeoutId);
+  }, [currentView, currentShowName, videos, totalDuration, zoom, saveShow]);
+
+  // Playback loop
+  React.useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  React.useEffect(() => {
+    if (isPlaying && totalDuration > 0) {
       lastTimeRef.current = Date.now();
-      
       const tick = () => {
+        if (!isPlayingRef.current) {
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+            animationRef.current = null;
+          }
+          return;
+        }
         const now = Date.now();
         const delta = (now - lastTimeRef.current) / 1000;
         lastTimeRef.current = now;
-        
-        setMasterTime(prev => {
+        setMasterTime((prev) => {
           const next = prev + delta;
           if (next >= totalDuration) {
+            isPlayingRef.current = false;
             setIsPlaying(false);
-            return 0;
+            return totalDuration;
           }
           return next;
         });
-        
         animationRef.current = requestAnimationFrame(tick);
       };
-      
       animationRef.current = requestAnimationFrame(tick);
-    } else {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+    } else if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
     }
-    
+
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
       }
     };
   }, [isPlaying, totalDuration]);
 
-  // Sync individual videos to master time
-  useEffect(() => {
-    videos.forEach(video => {
+  // Per-frame video sync — drives playback of all child videos against masterTime
+  React.useEffect(() => {
+    videos.forEach((video) => {
       const videoEl = videoRefs.current[video.id];
       if (!videoEl) return;
-      
-      const videoTime = masterTime - video.offset;
-      
-      if (videoTime >= 0 && videoTime <= video.duration) {
-        if (Math.abs(videoEl.currentTime - videoTime) > 0.3) {
-          videoEl.currentTime = videoTime;
+      if (!video.duration || video.duration <= 0) return;
+
+      videoEl.volume = video.volume || 1.0;
+      const trimStart = video.trimStart || 0;
+      const trimEnd = video.trimEnd || 0;
+      const videoTime = masterTime - (video.offset || 0);
+      const trimmedDuration = video.duration - trimStart - trimEnd;
+      if (trimmedDuration <= 0) return;
+
+      if (videoTime >= 0 && videoTime <= trimmedDuration) {
+        const actualVideoTime = videoTime + trimStart;
+
+        if (videoEl.paused) {
+          if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+            videoEl.currentTime = actualVideoTime;
+          }
+        } else if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.5) {
+          videoEl.currentTime = actualVideoTime;
         }
+
         if (isPlaying && videoEl.paused) {
-          videoEl.play().catch(() => {});
+          if (videoEl.readyState >= 2) {
+            const videoContainer = videoEl.parentElement;
+            if (videoContainer) {
+              const computedStyle = window.getComputedStyle(videoContainer);
+              if (computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                videoContainer.style.visibility = 'visible';
+                videoContainer.style.opacity = '1';
+              }
+            }
+            if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+              videoEl.currentTime = actualVideoTime;
+            }
+            videoEl.volume = video.volume || 1.0;
+            if (video.volume > 0) videoEl.muted = false;
+
+            const playPromise = videoEl.play();
+            if (playPromise !== undefined) {
+              playPromise.catch((err) => {
+                console.error(
+                  `[Video Sync] Failed to play ${video.id} (${video.name || 'unnamed'}):`,
+                  err,
+                );
+              });
+            }
+          }
         } else if (!isPlaying && !videoEl.paused) {
           videoEl.pause();
         }
       } else {
-        if (!videoEl.paused) {
-          videoEl.pause();
-        }
-        if (videoTime < 0) {
-          videoEl.currentTime = 0;
-        }
+        if (!videoEl.paused) videoEl.pause();
+        if (videoTime < 0) videoEl.currentTime = trimStart;
       }
     });
   }, [masterTime, videos, isPlaying]);
 
-  // Timeline drag handlers
-  const handleTimelineMouseDown = (e, videoId) => {
-    e.stopPropagation();
-    const video = videos.find(v => v.id === videoId);
-    setDraggingId(videoId);
-    setDragStartX(e.clientX);
-    setDragStartOffset(video.offset);
-  };
+  // ---------- Render ----------
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4">🎆</div>
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const handleTimelineMouseMove = useCallback((e) => {
-    if (!draggingId || !timelineRef.current) return;
-    
-    const timelineWidth = timelineRef.current.offsetWidth;
-    const pixelsPerSecond = (timelineWidth * zoom) / totalDuration;
-    const deltaX = e.clientX - dragStartX;
-    const deltaTime = deltaX / pixelsPerSecond;
-    const newOffset = Math.max(0, dragStartOffset + deltaTime);
-    
-    setVideos(prev => prev.map(v => 
-      v.id === draggingId ? { ...v, offset: newOffset } : v
-    ));
-  }, [draggingId, dragStartX, dragStartOffset, zoom, totalDuration]);
-
-  const handleTimelineMouseUp = useCallback(() => {
-    setDraggingId(null);
-  }, []);
-
-  useEffect(() => {
-    if (draggingId) {
-      window.addEventListener('mousemove', handleTimelineMouseMove);
-      window.addEventListener('mouseup', handleTimelineMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleTimelineMouseMove);
-        window.removeEventListener('mouseup', handleTimelineMouseUp);
-      };
-    }
-  }, [draggingId, handleTimelineMouseMove, handleTimelineMouseUp]);
-
-  const handleTimelineClick = (e) => {
-    if (draggingId) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const timelineWidth = rect.width;
-    const clickTime = (x / timelineWidth) * totalDuration / zoom;
-    setMasterTime(Math.max(0, Math.min(clickTime, totalDuration)));
-  };
-
-  const removeVideo = (id) => {
-    const video = videos.find(v => v.id === id);
-    if (video && video.url.startsWith('blob:')) {
-      URL.revokeObjectURL(video.url);
-    }
-    setVideos(prev => prev.filter(v => v.id !== id));
-  };
-
-  const updateOffset = (id, newOffset) => {
-    setVideos(prev => prev.map(v => 
-      v.id === id ? { ...v, offset: Math.max(0, parseFloat(newOffset) || 0) } : v
-    ));
-  };
-
-  const getGridClass = () => {
-    const count = videos.length;
-    if (count <= 1) return 'grid-cols-1';
-    if (count <= 2) return 'grid-cols-2';
-    if (count <= 4) return 'grid-cols-2';
-    return 'grid-cols-3';
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 10);
-    return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
-  };
+  if (!authenticated) {
+    return <LoginView onLogin={handleLogin} />;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-orange-400">🎆 Fireworks Show Planner</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowDownloader(!showDownloader)}
-            className={`px-4 py-2 rounded transition ${
-              showDownloader ? 'bg-orange-600' : 'bg-orange-500 hover:bg-orange-600'
-            }`}
-          >
-            {showDownloader ? '✕ Close' : '📥 YouTube'}
-          </button>
-          <label className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded cursor-pointer transition">
-            + Local Files
-            <input
-              type="file"
-              accept="video/*"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* YouTube Downloader Panel */}
-      {showDownloader && (
-        <div className="bg-gray-800 rounded-lg p-4 mb-4">
-          <div className="flex items-center gap-2 mb-3">
-            <h3 className="font-semibold">Download from YouTube</h3>
-            {backendStatus?.status === 'ok' ? (
-              <span className="text-xs text-green-400 flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-400 rounded-full"></span>
-                Backend connected (yt-dlp {backendStatus.ytdlp_version})
-              </span>
-            ) : (
-              <span className="text-xs text-red-400 flex items-center gap-1">
-                <span className="w-2 h-2 bg-red-400 rounded-full"></span>
-                Backend offline - start server.py first
-              </span>
-            )}
-          </div>
-          
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={youtubeUrl}
-              onChange={(e) => setYoutubeUrl(e.target.value)}
-              placeholder="Paste YouTube URL here..."
-              className="flex-1 bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-orange-500"
-              onKeyDown={(e) => e.key === 'Enter' && handleYoutubeDownload()}
-            />
-            <button
-              onClick={handleYoutubeDownload}
-              disabled={!youtubeUrl.trim() || backendStatus?.status !== 'ok'}
-              className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded transition"
-            >
-              Download
-            </button>
-          </div>
-
-          {/* Active downloads */}
-          {downloading.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {downloading.map(dl => (
-                <div key={dl.id} className="bg-gray-700 rounded p-2">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="truncate">{dl.title || 'Downloading...'}</span>
-                    <span>{Math.round(dl.progress || 0)}%</span>
-                  </div>
-                  <div className="h-2 bg-gray-600 rounded overflow-hidden">
-                    <div 
-                      className="h-full bg-orange-500 transition-all"
-                      style={{ width: `${dl.progress || 0}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Video Grid */}
-      <div className={`grid ${getGridClass()} gap-2 flex-1 min-h-0 mb-4`} style={{ minHeight: '300px' }}>
-        {videos.length === 0 ? (
-          <div className="col-span-full flex items-center justify-center border-2 border-dashed border-gray-600 rounded-lg">
-            <div className="text-center text-gray-400">
-              <p className="text-lg mb-2">No videos loaded</p>
-              <p className="text-sm">Use "YouTube" to download clips or "Local Files" to load from disk</p>
-            </div>
-          </div>
-        ) : (
-          videos.map(video => {
-            const videoTime = masterTime - video.offset;
-            const isActive = videoTime >= 0 && videoTime <= video.duration;
-            
-            return (
-              <div
-                key={video.id}
-                className={`relative bg-black rounded-lg overflow-hidden border-2 transition-colors`}
-                style={{ borderColor: isActive ? video.color : '#374151' }}
-              >
-                <video
-                  ref={el => videoRefs.current[video.id] = el}
-                  src={video.url}
-                  className="w-full h-full object-contain"
-                  onLoadedMetadata={(e) => handleVideoLoaded(video.id, e.target.duration)}
-                  crossOrigin="anonymous"
-                />
-                
-                <div 
-                  className="absolute top-2 left-2 px-2 py-1 rounded text-sm font-medium max-w-[70%] truncate"
-                  style={{ backgroundColor: video.color }}
-                >
-                  {video.name}
-                </div>
-                
-                <button
-                  onClick={() => removeVideo(video.id)}
-                  className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 w-6 h-6 rounded flex items-center justify-center text-sm"
-                >
-                  ×
-                </button>
-                
-                <div className="absolute bottom-2 left-2 right-2 flex items-center gap-2 bg-black/70 px-2 py-1 rounded">
-                  <span className="text-xs">Start:</span>
-                  <input
-                    type="number"
-                    value={video.offset.toFixed(1)}
-                    onChange={(e) => updateOffset(video.id, e.target.value)}
-                    className="w-16 bg-gray-800 text-white text-xs px-1 py-0.5 rounded"
-                    step="0.1"
-                    min="0"
-                  />
-                  <span className="text-xs text-gray-400">sec</span>
-                  
-                  {!isActive && videoTime < 0 && (
-                    <span className="text-xs text-yellow-400 ml-auto">
-                      Starts in {(-videoTime).toFixed(1)}s
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Transport Controls */}
-      <div className="bg-gray-800 rounded-lg p-4 mb-4">
-        <div className="flex items-center justify-center gap-4 mb-4">
-          <button
-            onClick={() => setMasterTime(0)}
-            className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded"
-          >
-            ⏮ Reset
-          </button>
-          <button
-            onClick={() => setMasterTime(prev => Math.max(0, prev - 1))}
-            className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded"
-          >
-            -1s
-          </button>
-          <button
-            onClick={() => setIsPlaying(!isPlaying)}
-            className={`px-6 py-2 rounded font-bold ${
-              isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-            }`}
-          >
-            {isPlaying ? '⏸ Pause' : '▶ Play'}
-          </button>
-          <button
-            onClick={() => setMasterTime(prev => Math.min(totalDuration, prev + 1))}
-            className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded"
-          >
-            +1s
-          </button>
-          <div className="text-xl font-mono ml-4">
-            {formatTime(masterTime)} / {formatTime(totalDuration)}
-          </div>
-        </div>
-
-        <input
-          type="range"
-          min="0"
-          max={totalDuration}
-          step="0.1"
-          value={masterTime}
-          onChange={(e) => setMasterTime(parseFloat(e.target.value))}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
+    <div>
+      {currentView === 'dashboard' && (
+        <Dashboard
+          onEditShow={handleEditShow}
+          onNewShow={handleNewShow}
+          onGoToLibrary={handleGoToLibrary}
+          savedSessions={savedSessions}
+          onDeleteShow={handleDeleteShow}
+          downloadedVideos={downloadedVideos}
+          onDownloadComplete={handleDownloadComplete}
+          currentUser={currentUser}
+          onLogout={handleLogout}
         />
-      </div>
-
-      {/* Timeline */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold">Timeline</h2>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400">Duration:</span>
-              <input
-                type="number"
-                value={totalDuration}
-                onChange={(e) => setTotalDuration(Math.max(10, parseFloat(e.target.value) || 60))}
-                className="w-16 bg-gray-700 text-white text-sm px-2 py-1 rounded"
-                min="10"
-              />
-              <span className="text-sm">sec</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-400">Zoom:</span>
-              <input
-                type="range"
-                min="0.5"
-                max="4"
-                step="0.1"
-                value={zoom}
-                onChange={(e) => setZoom(parseFloat(e.target.value))}
-                className="w-24"
-              />
-              <span className="text-sm">{zoom.toFixed(1)}x</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Time markers */}
-        <div className="relative h-6 mb-1 overflow-hidden">
-          {Array.from({ length: Math.ceil(totalDuration / 5) + 1 }, (_, i) => (
-            <div
-              key={i}
-              className="absolute text-xs text-gray-500"
-              style={{ left: `${(i * 5 / totalDuration) * 100 * zoom}%` }}
-            >
-              {i * 5}s
-            </div>
-          ))}
-        </div>
-
-        {/* Timeline tracks */}
-        <div
-          ref={timelineRef}
-          className="relative bg-gray-900 rounded overflow-x-auto cursor-pointer"
-          style={{ minHeight: Math.max(100, videos.length * 40 + 20) }}
-          onClick={handleTimelineClick}
-        >
-          {/* Playhead */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none"
-            style={{ left: `${(masterTime / totalDuration) * 100 * zoom}%` }}
-          >
-            <div className="absolute -top-1 -left-2 w-0 h-0 border-l-4 border-r-4 border-t-8 border-transparent border-t-red-500" />
-          </div>
-
-          {/* Video clips */}
-          {videos.map((video, index) => (
-            <div
-              key={video.id}
-              className="absolute h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg"
-              style={{
-                top: index * 40 + 10,
-                left: `${(video.offset / totalDuration) * 100 * zoom}%`,
-                width: `${(video.duration / totalDuration) * 100 * zoom}%`,
-                backgroundColor: video.color,
-                minWidth: '60px'
-              }}
-              onMouseDown={(e) => handleTimelineMouseDown(e, video.id)}
-            >
-              {video.name} ({video.duration.toFixed(1)}s)
-            </div>
-          ))}
-        </div>
-
-        <p className="text-xs text-gray-500 mt-2">
-          Drag clips to adjust timing • Click timeline to seek • Scroll to view full timeline
-        </p>
-      </div>
-
-      {/* Show Timing Summary */}
-      {videos.length > 0 && (
-        <div className="mt-4 bg-gray-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-2">Show Timing Cue Sheet</h3>
-          <div className="grid gap-1 text-sm font-mono">
-            {videos
-              .sort((a, b) => a.offset - b.offset)
-              .map(video => (
-                <div key={video.id} className="flex gap-2">
-                  <span style={{ color: video.color }}>●</span>
-                  <span className="text-gray-400 w-16">{formatTime(video.offset)}</span>
-                  <span>{video.name}</span>
-                  <span className="text-gray-500">({video.duration.toFixed(1)}s)</span>
-                </div>
-              ))}
-          </div>
-        </div>
       )}
+      {currentView === 'library' && (
+        <LibraryView
+          downloadedVideos={downloadedVideos}
+          setDownloadedVideos={setDownloadedVideos}
+          onBack={handleBackFromLibrary}
+          onDeleteVideo={handleDeleteVideo}
+          onSaveVideoSettings={handleSaveVideoSettings}
+          onDownloadComplete={handleDownloadComplete}
+        />
+      )}
+      {currentView === 'editor' && (
+        <ShowEditor
+          showName={currentShowName}
+          videos={videos}
+          setVideos={setVideos}
+          downloadedVideos={downloadedVideos}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+          masterTime={masterTime}
+          setMasterTime={setMasterTime}
+          totalDuration={totalDuration}
+          setTotalDuration={setTotalDuration}
+          zoom={zoom}
+          setZoom={setZoom}
+          draggingId={draggingId}
+          setDraggingId={setDraggingId}
+          dragStartX={dragStartX}
+          setDragStartX={setDragStartX}
+          dragStartOffset={dragStartOffset}
+          setDragStartOffset={setDragStartOffset}
+          gridHeight={gridHeight}
+          setGridHeight={setGridHeight}
+          videoRefs={videoRefs}
+          timelineRef={timelineRef}
+          onSave={saveShow}
+          onBack={handleBackToDashboard}
+          onAddFromLibrary={handleAddFromLibrary}
+          onDownloadComplete={handleDownloadComplete}
+          showToast={showToast}
+        />
+      )}
+
+      {/* Toast notifications */}
+      <div
+        className="fixed top-4 right-4 z-50 flex flex-col gap-2"
+        style={{ maxWidth: '400px' }}
+      >
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`${TOAST_BG[toast.type] || TOAST_BG.info} text-white px-4 py-3 rounded-lg shadow-lg flex items-start gap-2`}
+          >
+            <span className="text-lg">{TOAST_ICON[toast.type] || TOAST_ICON.info}</span>
+            <span className="flex-1 text-sm">{toast.message}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

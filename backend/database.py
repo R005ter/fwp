@@ -287,7 +287,29 @@ def init_db():
             import traceback
             traceback.print_exc()
             raise
-        
+
+        # Auth tokens table — for desktop / local-client X-Auth-Token sessions.
+        # Lives in the DB rather than process memory so multi-worker gunicorn
+        # doesn't strand tokens on the worker that issued them.
+        try:
+            execute_sql(cursor, f'''
+                CREATE TABLE IF NOT EXISTS auth_tokens (
+                    token {text_type} PRIMARY KEY,
+                    user_id {int_type} NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    expires_at TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP {timestamp_default}
+                )
+            ''')
+            execute_sql(cursor, '''
+                CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id)
+            ''')
+            print("✓ Created/verified auth_tokens table")
+        except Exception as e:
+            print(f"✗ Error creating auth_tokens table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+
         conn.commit()
         print("✅ Database initialized - all tables created successfully")
     except Exception as e:
@@ -441,20 +463,47 @@ def get_user_shows(user_id):
     """Get all shows for a user"""
     conn = get_db()
     cursor = conn.cursor()
-    
+
     execute_sql(cursor,
         'SELECT name, data, timestamp FROM shows WHERE user_id = %s ORDER BY timestamp DESC',
         (user_id,)
     )
     rows = fetch_all(cursor)
     conn.close()
-    
+
     shows = []
     for row in rows:
         shows.append({
             "name": row['name'],
             "data": json.loads(row['data']),
             "timestamp": row['timestamp']
+        })
+    return shows
+
+
+def get_all_shows_with_creators():
+    """Admin view: all shows from all users, joined with creator info."""
+    conn = get_db()
+    cursor = conn.cursor()
+    execute_sql(cursor, '''
+        SELECT s.name, s.data, s.timestamp, s.user_id,
+               u.username AS creator_username, u.email AS creator_email
+        FROM shows s
+        LEFT JOIN users u ON s.user_id = u.id
+        ORDER BY s.timestamp DESC
+    ''')
+    rows = fetch_all(cursor)
+    conn.close()
+
+    shows = []
+    for row in rows:
+        shows.append({
+            "name": row['name'],
+            "data": json.loads(row['data']),
+            "timestamp": row['timestamp'],
+            "user_id": row['user_id'],
+            "creator_username": row['creator_username'],
+            "creator_email": row['creator_email'],
         })
     return shows
 
@@ -708,3 +757,70 @@ def set_user_youtube_cookies(user_id, cookies_data):
     conn.close()
     
     return cursor.rowcount > 0
+
+
+# -------- Auth tokens (desktop / local-client X-Auth-Token sessions) --------
+
+def create_auth_token(token, user_id, ttl_seconds=86400):
+    """Persist a freshly minted auth token. Caller computes the token string."""
+    from datetime import datetime, timedelta
+    expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        execute_sql(cursor,
+            'INSERT INTO auth_tokens (token, user_id, expires_at) VALUES (%s, %s, %s)',
+            (token, user_id, expires_at)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_auth_token(token):
+    """Return user_id if the token is valid + unexpired, else None.
+    Cleans up expired rows lazily on hit."""
+    if not token:
+        return None
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        execute_sql(cursor,
+            'SELECT user_id, expires_at FROM auth_tokens WHERE token = %s',
+            (token,)
+        )
+        row = fetch_one(cursor)
+        if not row:
+            return None
+        from datetime import datetime
+        if row['expires_at'] < datetime.utcnow():
+            execute_sql(cursor, 'DELETE FROM auth_tokens WHERE token = %s', (token,))
+            conn.commit()
+            return None
+        return row['user_id']
+    finally:
+        conn.close()
+
+
+def delete_auth_token(token):
+    if not token:
+        return
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        execute_sql(cursor, 'DELETE FROM auth_tokens WHERE token = %s', (token,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cleanup_expired_auth_tokens():
+    """Remove all expired tokens. Called occasionally; not on every request."""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        execute_sql(cursor, 'DELETE FROM auth_tokens WHERE expires_at < CURRENT_TIMESTAMP')
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()

@@ -1,0 +1,3620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>🎆 Fireworks Show Planner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* iOS Safari fixes */
+    input[type="range"] {
+      -webkit-appearance: none;
+      touch-action: pan-y;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      background: #f97316;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    /* Prevent text selection on drag elements */
+    .no-select {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    /* Better touch targets */
+    @media (max-width: 768px) {
+      button, input, select {
+        min-height: 44px; /* iOS recommended touch target */
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import React from 'https://esm.sh/react@18';
+    import ReactDOM from 'https://esm.sh/react-dom@18/client';
+    
+    // Use relative URL in production, localhost in development
+    const API_BASE = window.location.hostname === 'localhost' 
+      ? 'http://localhost:5000' 
+      : window.location.origin;
+
+    // Extract YouTube video ID from URL
+    function extractVideoId(url) {
+      const patterns = [
+        /[?&]v=([^&]+)/,
+        /youtu\.be\/([^?&]+)/,
+        /^([a-zA-Z0-9_-]{11})$/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+      }
+      return null;
+    }
+
+    // ======================
+    // Login/Register Component
+    // ======================
+    const LoginView = ({ onLogin }) => {
+      const [isLogin, setIsLogin] = React.useState(true);
+      const [username, setUsername] = React.useState('');
+      const [email, setEmail] = React.useState('');
+      const [password, setPassword] = React.useState('');
+      const [error, setError] = React.useState('');
+      const [loading, setLoading] = React.useState(false);
+
+      // Check for OAuth errors in URL
+      React.useEffect(() => {
+        const hash = window.location.hash;
+        const urlParams = new URLSearchParams(hash.split('?')[1] || '');
+        const oauthError = urlParams.get('error');
+        
+        if (oauthError) {
+          const errorMessages = {
+            'oauth_not_configured': 'Google sign-in is not configured on the server.',
+            'oauth_failed': 'Google sign-in failed. Please try again.',
+            'user_creation_failed': 'Could not create account. Please try again.',
+            'oauth_error': 'An error occurred during sign-in. Please try again.'
+          };
+          setError(errorMessages[oauthError] || 'Sign-in failed. Please try again.');
+          // Clean up URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      }, []);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+
+        try {
+          const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+          const body = isLogin 
+            ? { username, password }
+            : { username, email, password };
+
+          const res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(body)
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            onLogin(data.user);
+          } else {
+            setError(data.error || 'Something went wrong');
+          }
+        } catch (err) {
+          setError('Connection error. Is the backend running?');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return React.createElement('div', { 
+        className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4' 
+      },
+        React.createElement('div', { 
+          className: 'bg-gray-800/90 backdrop-blur rounded-lg p-8 w-full max-w-md border border-purple-500/30 shadow-xl' 
+        },
+          React.createElement('div', { className: 'text-center mb-8' },
+            React.createElement('h1', { className: 'text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Planner'),
+            React.createElement('p', { className: 'text-gray-300' }, 
+              isLogin ? 'Sign in to access your shows' : 'Create an account to get started'
+            )
+          ),
+
+          error && React.createElement('div', { 
+            className: 'bg-red-900/50 border border-red-600 text-red-200 px-4 py-3 rounded mb-4 text-sm' 
+          }, error),
+
+          React.createElement('form', { onSubmit: handleSubmit, className: 'space-y-4' },
+            React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Username'),
+              React.createElement('input', {
+                type: 'text',
+                value: username,
+                onChange: (e) => setUsername(e.target.value),
+                required: true,
+                minLength: 3,
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'Enter username',
+                autoFocus: true
+              })
+            ),
+
+            !isLogin && React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Email (optional)'),
+              React.createElement('input', {
+                type: 'email',
+                value: email,
+                onChange: (e) => setEmail(e.target.value),
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'your@email.com'
+              })
+            ),
+
+            React.createElement('div', null,
+              React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Password'),
+              React.createElement('input', {
+                type: 'password',
+                value: password,
+                onChange: (e) => setPassword(e.target.value),
+                required: true,
+                minLength: isLogin ? 1 : 6,
+                className: 'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base',
+                placeholder: 'Enter password'
+              })
+            ),
+
+            React.createElement('button', {
+              type: 'submit',
+              disabled: loading,
+              className: `w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-3 rounded-lg font-bold text-base transition ${loading ? 'opacity-50' : ''}`
+            }, loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')),
+
+            React.createElement('div', { className: 'text-center pt-4' },
+              React.createElement('button', {
+                type: 'button',
+                onClick: () => {
+                  setIsLogin(!isLogin);
+                  setError('');
+                  setPassword('');
+                },
+                className: 'text-purple-400 hover:text-purple-300 text-sm underline'
+              }, isLogin 
+                ? "Don't have an account? Sign up" 
+                : "Already have an account? Sign in"
+              )
+            )
+          ),
+
+          // Google OAuth Button
+          React.createElement('div', { className: 'mt-6' },
+            React.createElement('div', { className: 'flex items-center mb-4' },
+              React.createElement('div', { className: 'flex-1 border-t border-gray-600' }),
+              React.createElement('span', { className: 'px-4 text-sm text-gray-400' }, 'OR'),
+              React.createElement('div', { className: 'flex-1 border-t border-gray-600' })
+            ),
+            React.createElement('button', {
+              type: 'button',
+              onClick: () => {
+                // Pass the frontend URL so OAuth can redirect back to the correct port
+                const frontendUrl = window.location.origin;
+                window.location.href = `${API_BASE}/api/auth/google?frontend_url=${encodeURIComponent(frontendUrl)}`;
+              },
+              className: 'w-full bg-white hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg font-medium text-base transition flex items-center justify-center gap-3 border border-gray-300'
+            },
+              React.createElement('svg', { 
+                className: 'w-5 h-5',
+                viewBox: '0 0 24 24'
+              },
+                React.createElement('path', {
+                  fill: '#4285F4',
+                  d: 'M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z'
+                }),
+                React.createElement('path', {
+                  fill: '#34A853',
+                  d: 'M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z'
+                }),
+                React.createElement('path', {
+                  fill: '#FBBC05',
+                  d: 'M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z'
+                }),
+                React.createElement('path', {
+                  fill: '#EA4335',
+                  d: 'M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z'
+                })
+              ),
+              React.createElement('span', null, 'Sign in with Google')
+            )
+          )
+        )
+      );
+    };
+
+    // ======================
+    // Dashboard Component
+    // ======================
+    const Dashboard = ({ 
+      onEditShow, 
+      onNewShow,
+      onGoToLibrary,
+      savedSessions, 
+      onDeleteShow, 
+      downloadedVideos,
+      onDownloadComplete,
+      currentUser,
+      onLogout
+    }) => {
+      const [searchQuery, setSearchQuery] = React.useState('');
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            downloading.map(async (dl) => {
+              try {
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
+                const status = await res.json();
+                return { ...dl, ...status };
+              } catch {
+                return dl;
+              }
+            })
+          );
+          
+          setDownloading(updates.filter(dl => dl.status === 'downloading'));
+          
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => clearInterval(interval);
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
+        
+        const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
+        if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Use yt-dlp server-side download
+        console.log('[Download] Starting download via yt-dlp...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
+        }]);
+        
+        try {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          console.log('[Download] yt-dlp response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
+          }
+          
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
+          if (data.status === 'complete') {
+            console.log('[Download] Download complete!');
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: videoId,
+              filename: data.filename,
+              title: data.title,
+              status: 'complete',
+              localUrl: `${API_BASE}/videos/${data.filename}`
+            });
+            setYoutubeUrl('');
+          }
+          // Otherwise, polling will handle progress updates
+        } catch (err) {
+          console.error('[Download] Download failed:', err);
+          alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+        }
+      };
+
+      const filteredSessions = savedSessions.filter(s => 
+        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const sortedSessions = [...filteredSessions].sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+      );
+
+      return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-6' },
+        React.createElement('div', { className: 'max-w-7xl mx-auto' },
+          // Header
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-6 md:mb-8 gap-4' },
+            React.createElement('div', null,
+              React.createElement('h1', { className: 'text-3xl md:text-4xl font-bold text-orange-400 mb-2' }, '🎆 Fireworks Show Planner'),
+              React.createElement('p', { className: 'text-sm md:text-base text-gray-300' }, 
+                currentUser ? `Welcome, ${currentUser.username}!` : 'Plan your perfect fireworks show'
+              )
+            ),
+            React.createElement('div', { className: 'flex flex-col sm:flex-row gap-2 w-full md:w-auto' },
+              React.createElement('button', {
+                onClick: onGoToLibrary,
+                className: 'bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg'
+              }, '📚 Library'),
+              React.createElement('button', {
+                onClick: onNewShow,
+                className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg'
+              }, '+ New Show'),
+              React.createElement('button', {
+                onClick: onLogout,
+                className: 'bg-gray-600 hover:bg-gray-700 px-4 py-3 rounded-lg font-medium text-sm md:text-base transition'
+              }, '🚪 Logout')
+            )
+          ),
+
+          // Stats Bar
+          React.createElement('div', { className: 'grid grid-cols-3 gap-2 md:gap-4 mb-6 md:mb-8' },
+            React.createElement('div', { 
+              className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-purple-500/30 cursor-pointer hover:border-purple-400 transition',
+              onClick: () => sortedSessions.length > 0 && onEditShow(sortedSessions[0].name)
+            },
+              React.createElement('div', { className: 'text-3xl font-bold text-purple-400' }, savedSessions.length),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 'Total Shows')
+            ),
+            React.createElement('div', { 
+              className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-blue-500/30 cursor-pointer hover:border-blue-400 transition',
+              onClick: onGoToLibrary
+            },
+              React.createElement('div', { className: 'text-3xl font-bold text-blue-400' }, downloadedVideos.size),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 'Videos in Library')
+            ),
+            React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30' },
+              React.createElement('div', { className: 'text-3xl font-bold ' + (backendStatus?.status === 'ok' ? 'text-green-400' : 'text-red-400') }, 
+                backendStatus?.status === 'ok' ? '●' : '○'
+              ),
+              React.createElement('div', { className: 'text-sm text-gray-400 mt-1' }, 
+                backendStatus?.status === 'ok' ? 'Backend Connected' : 'Backend Offline'
+              )
+            )
+          ),
+
+          // Main Content Grid
+          React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6' },
+            // Left Side: Shows List (2/3 width on large screens)
+            React.createElement('div', { className: 'lg:col-span-2' },
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-purple-500/30' },
+                React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+                  React.createElement('h2', { className: 'text-2xl font-bold text-purple-300' }, '🎭 Your Shows'),
+                  React.createElement('input', {
+                    type: 'text',
+                    value: searchQuery,
+                    onChange: (e) => setSearchQuery(e.target.value),
+                    placeholder: 'Search shows...',
+                    className: 'bg-gray-700/50 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 w-64'
+                  })
+                ),
+
+                sortedSessions.length === 0 
+                  ? React.createElement('div', { className: 'text-center py-12' },
+                      React.createElement('div', { className: 'text-6xl mb-4' }, '🎆'),
+                      React.createElement('p', { className: 'text-xl text-gray-400 mb-2' }, 'No shows yet'),
+                      React.createElement('p', { className: 'text-sm text-gray-500 mb-6' }, 'Create your first fireworks show to get started!'),
+                      React.createElement('button', {
+                        onClick: onNewShow,
+                        className: 'bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold transition'
+                      }, '+ Create First Show')
+                    )
+                  : React.createElement('div', { className: 'space-y-3 max-h-[600px] overflow-y-auto' },
+                      sortedSessions.map(session => 
+                        React.createElement('div', {
+                          key: session.name,
+                          className: 'bg-gray-700/50 rounded-lg p-4 hover:bg-gray-700 transition cursor-pointer border border-transparent hover:border-purple-500',
+                          onClick: () => onEditShow(session.name)
+                        },
+                          React.createElement('div', { className: 'flex items-start justify-between' },
+                            React.createElement('div', { className: 'flex-1' },
+                              React.createElement('div', { className: 'flex items-center gap-3 mb-2' },
+                                React.createElement('h3', { className: 'text-xl font-bold text-white' }, session.name),
+                                React.createElement('span', { className: 'text-xs px-2 py-1 bg-purple-600 rounded' }, 
+                                  `${session.videos.length} items`
+                                )
+                              ),
+                              React.createElement('div', { className: 'text-sm text-gray-400 mb-2' },
+                                `Duration: ${session.totalDuration?.toFixed(0) || 60}s`
+                              ),
+                              React.createElement('div', { className: 'text-xs text-gray-500' },
+                                `Last modified: ${new Date(session.timestamp).toLocaleDateString()} at ${new Date(session.timestamp).toLocaleTimeString()}`
+                              )
+                            ),
+                            React.createElement('div', { className: 'flex gap-2', onClick: (e) => e.stopPropagation() },
+                              React.createElement('button', {
+                                onClick: () => onEditShow(session.name),
+                                className: 'bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm transition'
+                              }, '✏️ Edit'),
+                              React.createElement('button', {
+                                onClick: () => {
+                                  if (confirm(`Delete show "${session.name}"?`)) {
+                                    onDeleteShow(session.name);
+                                  }
+                                },
+                                className: 'bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition'
+                              }, '🗑️')
+                            )
+                          )
+                        )
+                      )
+                    )
+              )
+            ),
+
+            // Right Side: YouTube Downloader
+            React.createElement('div', { className: 'space-y-6' },
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30' },
+                React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 YouTube Downloader'),
+                React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
+                  'Server-side download via yt-dlp'
+                ),
+                
+                React.createElement('div', { className: 'space-y-3' },
+                  React.createElement('input', {
+                    type: 'text',
+                    value: youtubeUrl,
+                    onChange: (e) => setYoutubeUrl(e.target.value),
+                    placeholder: 'Paste YouTube URL...',
+                    className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                    onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                  }),
+                  React.createElement('button', {
+                    onClick: handleYoutubeDownload,
+                    disabled: !youtubeUrl.trim(),
+                    className: 'w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition font-bold'
+                  }, 'Download Video'),
+
+                  downloading.length > 0 && React.createElement('div', { className: 'space-y-2 mt-3' },
+                    downloading.map(dl => 
+                      React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                        React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                          React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                          React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                        ),
+                        React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                          React.createElement('div', {
+                            className: 'h-full bg-orange-500 transition-all',
+                            style: { width: `${dl.progress || 0}%` }
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                    React.createElement('button', {
+                      onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                      className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                    }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+                  ),
+
+                  showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeSearchQuery,
+                      onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                      placeholder: 'e.g., fireworks display...',
+                      className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      }
+                    }),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      },
+                      className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                    }, '🔍 Search on YouTube')
+                  )
+                )
+              ),
+
+              // Quick Library Preview
+              React.createElement('div', { 
+                className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-green-500/30 cursor-pointer hover:border-green-400 transition',
+                onClick: onGoToLibrary
+              },
+                React.createElement('div', { className: 'flex items-center justify-between mb-3' },
+                  React.createElement('h2', { className: 'text-xl font-bold text-green-300' }, '📚 Library'),
+                  React.createElement('span', { className: 'text-sm text-gray-400' }, `${downloadedVideos.size} videos`)
+                ),
+                React.createElement('p', { className: 'text-sm text-gray-400 mb-3' }, 'Manage your video collection'),
+                React.createElement('button', {
+                  className: 'w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition'
+                }, 'Manage Library →')
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ======================
+    // Library Management Component
+    // ======================
+    const LibraryView = ({ 
+      downloadedVideos,
+      setDownloadedVideos,
+      onBack, 
+      onEditVideo, 
+      onDeleteVideo,
+      onSaveVideoSettings,
+      onDownloadComplete
+    }) => {
+      const [searchQuery, setSearchQuery] = React.useState('');
+      const [editingVideo, setEditingVideo] = React.useState(null);
+      const [previewVideoRef, setPreviewVideoRef] = React.useState(null);
+      const [previewTime, setPreviewTime] = React.useState(0);
+      const [previewPlaying, setPreviewPlaying] = React.useState(false);
+      const [editTitle, setEditTitle] = React.useState('');
+      const [editTrimStart, setEditTrimStart] = React.useState(0);
+      const [editTrimEnd, setEditTrimEnd] = React.useState(0);
+      
+      // Crop settings (as percentages: 0-100)
+      const [editCropX, setEditCropX] = React.useState(0);
+      const [editCropY, setEditCropY] = React.useState(0);
+      const [editCropWidth, setEditCropWidth] = React.useState(100);
+      const [editCropHeight, setEditCropHeight] = React.useState(100);
+      
+      // YouTube download functionality
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+      
+      // Detect mobile device (hide YouTube downloads on mobile)
+      const [isMobile, setIsMobile] = React.useState(false);
+      React.useEffect(() => {
+        const checkMobile = () => {
+          const isMobileDevice = window.innerWidth < 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          setIsMobile(isMobileDevice);
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+      }, []);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      // Poll for download progress (only for server-side downloads)
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        // Filter to only server-side downloads (client-side handles its own progress)
+        const serverDownloads = downloading.filter(dl => dl.serverSide === true);
+        if (serverDownloads.length === 0) {
+          console.log('[Polling] No server-side downloads to poll');
+          return;
+        }
+        
+        console.log(`[Polling] Starting to poll ${serverDownloads.length} server-side download(s)...`);
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            serverDownloads.map(async (dl) => {
+              try {
+                console.log(`[Polling] Checking status for download: ${dl.id}`);
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
+                
+                if (!res.ok) {
+                  console.warn(`[Polling] Status check failed for ${dl.id}: HTTP ${res.status}`);
+                  return dl;
+                }
+                
+                const status = await res.json();
+                console.log(`[Polling] Status for ${dl.id}:`, {
+                  status: status.status,
+                  progress: status.progress,
+                  title: status.title
+                });
+                
+                return { ...dl, ...status };
+              } catch (err) {
+                console.error(`[Polling] Error checking status for ${dl.id}:`, err);
+                return dl;
+              }
+            })
+          );
+          
+          // Update server-side downloads
+          setDownloading(prev => {
+            const clientDownloads = prev.filter(dl => !dl.serverSide);
+            const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
+            return [...clientDownloads, ...updatedServerDownloads];
+          });
+          
+          // Notify parent of completed downloads
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              console.log(`[Polling] Download complete: ${dl.id} - ${dl.title || dl.filename}`);
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => {
+          console.log('[Polling] Stopping polling');
+          clearInterval(interval);
+        };
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
+        
+        const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
+        if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Use yt-dlp server-side download
+        console.log('[Download] Starting download via yt-dlp...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
+        }]);
+        
+        try {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          console.log('[Download] yt-dlp response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
+          }
+          
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
+          if (data.status === 'complete') {
+            console.log('[Download] Download complete!');
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: videoId,
+              filename: data.filename,
+              title: data.title,
+              status: 'complete',
+              localUrl: `${API_BASE}/videos/${data.filename}`
+            });
+            setYoutubeUrl('');
+          }
+          // Otherwise, polling will handle progress updates
+        } catch (err) {
+          console.error('[Download] Download failed:', err);
+          alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+        }
+      };
+
+      const filteredVideos = Array.from(downloadedVideos.values()).filter(v =>
+        v.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        v.filename.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const handleEditVideo = (video) => {
+        setEditingVideo(video);
+        setEditTitle(video.title);
+        setEditTrimStart(video.defaultTrimStart || 0);
+        setEditTrimEnd(video.defaultTrimEnd || 0);
+        setEditCropX(video.defaultCropX || 0);
+        setEditCropY(video.defaultCropY || 0);
+        setEditCropWidth(video.defaultCropWidth || 100);
+        setEditCropHeight(video.defaultCropHeight || 100);
+        setPreviewTime(video.defaultTrimStart || 0);
+        setPreviewPlaying(false);
+      };
+
+      const handleSaveVideo = () => {
+        if (editingVideo) {
+          onSaveVideoSettings(editingVideo.filename, {
+            title: editTitle,
+            defaultTrimStart: editTrimStart,
+            defaultTrimEnd: editTrimEnd,
+            defaultCropX: editCropX,
+            defaultCropY: editCropY,
+            defaultCropWidth: editCropWidth,
+            defaultCropHeight: editCropHeight
+          });
+          if (previewVideoRef) {
+            previewVideoRef.pause();
+          }
+          setEditingVideo(null);
+        }
+      };
+
+      const handleCancelEdit = () => {
+        if (previewVideoRef) {
+          previewVideoRef.pause();
+        }
+        setEditingVideo(null);
+      };
+
+      return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 text-white p-6' },
+        React.createElement('div', { className: 'max-w-7xl mx-auto' },
+          // Header
+          React.createElement('div', { className: 'flex items-center justify-between mb-8' },
+            React.createElement('div', null,
+              React.createElement('div', { className: 'flex items-center gap-4' },
+                React.createElement('button', {
+                  onClick: onBack,
+                  className: 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition'
+                }, '← Back'),
+                React.createElement('div', null,
+                  React.createElement('h1', { className: 'text-4xl font-bold text-green-400 mb-2' }, '📚 Video Library'),
+                  React.createElement('p', { className: 'text-gray-300' }, 'Manage your fireworks video collection')
+                )
+              )
+            ),
+            React.createElement('div', { className: 'text-right' },
+              React.createElement('div', { className: 'text-2xl font-bold text-green-400' }, downloadedVideos.size),
+              React.createElement('div', { className: 'text-sm text-gray-400' }, 'Total Videos')
+            )
+          ),
+
+          !editingVideo ? (
+            // Video List View
+            React.createElement('div', null,
+              // YouTube Downloader Section (hidden on mobile)
+              !isMobile && React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30 mb-6' },
+                React.createElement('h2', { className: 'text-xl font-bold text-orange-300 mb-4' }, '📥 Add Videos to Library'),
+                React.createElement('div', { className: 'text-xs text-blue-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full' }),
+                  'Server-side download via yt-dlp'
+                ),
+                
+                React.createElement('div', { className: 'space-y-3' },
+                  React.createElement('div', { className: 'flex gap-2' },
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeUrl,
+                      onChange: (e) => setYoutubeUrl(e.target.value),
+                      placeholder: 'Paste YouTube URL...',
+                      className: 'flex-1 bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                      onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                    }),
+                    React.createElement('button', {
+                      onClick: handleYoutubeDownload,
+                      disabled: !youtubeUrl.trim(),
+                      className: 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold'
+                    }, 'Download')
+                  ),
+
+                  downloading.length > 0 && React.createElement('div', { className: 'space-y-2' },
+                    downloading.map(dl => 
+                      React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                        React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                          React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                          React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                        ),
+                        React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                          React.createElement('div', {
+                            className: 'h-full bg-orange-500 transition-all',
+                            style: { width: `${dl.progress || 0}%` }
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                    React.createElement('button', {
+                      onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                      className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                    }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+                  ),
+
+                  showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: youtubeSearchQuery,
+                      onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                      placeholder: 'e.g., fireworks display...',
+                      className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                      onKeyDown: (e) => {
+                        if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      }
+                    }),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (youtubeSearchQuery.trim()) {
+                          window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                        }
+                      },
+                      className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                    }, '🔍 Search on YouTube')
+                  )
+                )
+              ),
+
+              // Search Bar
+              React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-green-500/30 mb-6' },
+                React.createElement('input', {
+                  type: 'text',
+                  value: searchQuery,
+                  onChange: (e) => setSearchQuery(e.target.value),
+                  placeholder: 'Search videos...',
+                  className: 'w-full bg-gray-700/50 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500'
+                })
+              ),
+
+              downloadedVideos.size === 0 
+                ? React.createElement('div', { className: 'text-center py-20 bg-gray-800/50 backdrop-blur rounded-lg border border-green-500/30' },
+                    React.createElement('div', { className: 'text-6xl mb-4' }, '📹'),
+                    React.createElement('p', { className: 'text-xl text-gray-400 mb-2' }, 'No videos in library'),
+                    React.createElement('p', { className: 'text-sm text-gray-500' }, 'Download videos from YouTube to get started')
+                  )
+                : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
+                    filteredVideos.map(video =>
+                      React.createElement('div', {
+                        key: video.filename,
+                        className: 'bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30 hover:border-green-400 transition'
+                      },
+                        React.createElement('div', { className: 'mb-3' },
+                          React.createElement('div', { className: 'font-bold text-lg mb-2 text-white truncate' }, video.title),
+                          React.createElement('div', { className: 'text-xs text-gray-400 mb-2 truncate' }, video.filename),
+                          
+                          // Duration info
+                          video.duration && React.createElement('div', { className: 'text-sm text-blue-400 mb-2 flex items-center gap-1' },
+                            React.createElement('span', null, '⏱️'),
+                            React.createElement('span', null, (() => {
+                              const trimmedDuration = (video.duration || 0) - (video.defaultTrimStart || 0) - (video.defaultTrimEnd || 0);
+                              return `${trimmedDuration.toFixed(1)}s`;
+                            })()),
+                            (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('span', { className: 'text-gray-500 text-xs' }, 
+                              `(${video.duration?.toFixed(1)}s full)`
+                            )
+                          ),
+                          
+                          (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('div', { className: 'text-xs text-yellow-400 mt-2 flex items-center gap-1' },
+                            React.createElement('span', null, '✂️'),
+                            React.createElement('span', null, `Trim: ${video.defaultTrimStart.toFixed(1)}s - ${video.defaultTrimEnd.toFixed(1)}s`)
+                          ),
+                          
+                          // Hidden video element to load duration
+                          !video.duration && React.createElement('video', {
+                            src: video.url,
+                            style: { display: 'none' },
+                            onLoadedMetadata: (e) => {
+                              const duration = e.target.duration;
+                              setDownloadedVideos(prev => {
+                                const newMap = new Map(prev);
+                                const existing = newMap.get(video.filename);
+                                if (existing) {
+                                  newMap.set(video.filename, { ...existing, duration });
+                                  // Save to localStorage
+                                  const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                                  libraryData[video.filename] = {
+                                    ...libraryData[video.filename],
+                                    duration
+                                  };
+                                  localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                                }
+                                return newMap;
+                              });
+                            }
+                          })
+                        ),
+                        React.createElement('div', { className: 'flex gap-2' },
+                          React.createElement('button', {
+                            onClick: () => handleEditVideo(video),
+                            className: 'flex-1 bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm transition'
+                          }, '✏️ Edit'),
+                          React.createElement('button', {
+                            onClick: () => {
+                              if (confirm(`Delete "${video.title}" from library?\n\nThis will remove it from the server and all shows.`)) {
+                                onDeleteVideo(video);
+                              }
+                            },
+                            className: 'bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition'
+                          }, '🗑️')
+                        )
+                      )
+                    )
+                  )
+            )
+          ) : (
+            // Video Editor View
+            React.createElement('div', { className: 'bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-blue-500/30' },
+              React.createElement('div', { className: 'mb-6' },
+                React.createElement('h2', { className: 'text-2xl font-bold text-blue-400 mb-2' }, 'Editing Video Settings'),
+                React.createElement('div', { className: 'bg-yellow-900/30 border border-yellow-600/50 rounded-lg p-4 text-sm' },
+                  React.createElement('div', { className: 'font-bold text-yellow-400 mb-2 flex items-center gap-2' },
+                    React.createElement('span', null, '⚠️'),
+                    React.createElement('span', null, 'Important: Default Settings')
+                  ),
+                  React.createElement('p', { className: 'text-yellow-200 mb-2' }, 
+                    'These are DEFAULT settings for new uses of this video.'
+                  ),
+                  React.createElement('p', { className: 'text-yellow-300' }, 
+                    'Videos already added to shows will keep their existing settings and timing. This prevents accidental timing changes in your saved shows.'
+                  )
+                )
+              ),
+
+              React.createElement('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-6' },
+                // Left: Video Preview
+                React.createElement('div', null,
+                  React.createElement('h3', { className: 'text-lg font-semibold mb-3 text-gray-300' }, 'Preview'),
+                  React.createElement('div', { 
+                    className: 'relative bg-black rounded-lg mb-3 overflow-hidden',
+                    style: { aspectRatio: '16/9' }
+                  },
+                    React.createElement('video', {
+                      ref: el => setPreviewVideoRef(el),
+                      src: editingVideo.url,
+                      className: 'absolute inset-0 w-full h-full object-cover',
+                      style: {
+                        clipPath: `inset(${editCropY}% ${100 - editCropX - editCropWidth}% ${100 - editCropY - editCropHeight}% ${editCropX}%)`
+                      },
+                      onTimeUpdate: (e) => setPreviewTime(e.target.currentTime),
+                      onLoadedMetadata: (e) => {
+                        e.target.currentTime = editTrimStart;
+                      }
+                    })
+                  ),
+                  React.createElement('div', { className: 'flex gap-2 mb-3' },
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (previewVideoRef) {
+                          if (previewPlaying) {
+                            previewVideoRef.pause();
+                            setPreviewPlaying(false);
+                          } else {
+                            previewVideoRef.play();
+                            setPreviewPlaying(true);
+                          }
+                        }
+                      },
+                      className: 'flex-1 bg-green-600 hover:bg-green-700 py-2 rounded transition'
+                    }, previewPlaying ? '⏸ Pause' : '▶ Play'),
+                    React.createElement('button', {
+                      onClick: () => {
+                        if (previewVideoRef) {
+                          previewVideoRef.currentTime = editTrimStart;
+                        }
+                      },
+                      className: 'bg-gray-600 hover:bg-gray-500 py-2 px-4 rounded transition'
+                    }, '↻ Go to Start')
+                  ),
+                  
+                  // Playback Slider
+                  previewVideoRef && React.createElement('div', { className: 'mb-3' },
+                    React.createElement('input', {
+                      type: 'range',
+                      min: '0',
+                      max: previewVideoRef.duration || 0,
+                      step: '0.1',
+                      value: previewTime,
+                      onChange: (e) => {
+                        const newTime = parseFloat(e.target.value);
+                        setPreviewTime(newTime);
+                        if (previewVideoRef) {
+                          previewVideoRef.currentTime = newTime;
+                        }
+                      },
+                      className: 'w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500'
+                    }),
+                    React.createElement('div', { className: 'flex justify-between text-xs text-gray-500 mt-1' },
+                      React.createElement('span', null, `0:00`),
+                      React.createElement('span', null, previewVideoRef.duration ? `${Math.floor(previewVideoRef.duration / 60)}:${Math.floor(previewVideoRef.duration % 60).toString().padStart(2, '0')}` : '0:00')
+                    )
+                  ),
+                  
+                  React.createElement('div', { className: 'text-center text-sm text-gray-400' },
+                    `Current Time: ${previewTime.toFixed(2)}s`,
+                    previewVideoRef && ` / ${previewVideoRef.duration?.toFixed(2) || 0}s`
+                  )
+                ),
+
+                // Right: Settings
+                React.createElement('div', null,
+                  React.createElement('h3', { className: 'text-lg font-semibold mb-3 text-gray-300' }, 'Default Settings'),
+                  
+                  React.createElement('div', { className: 'mb-4' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Video Title:'),
+                    React.createElement('input', {
+                      type: 'text',
+                      value: editTitle,
+                      onChange: (e) => setEditTitle(e.target.value),
+                      className: 'w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      autoFocus: true
+                    })
+                  ),
+
+                  React.createElement('div', { className: 'mb-4' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Default Trim Start (seconds):'),
+                    React.createElement('div', { className: 'flex gap-2' },
+                      React.createElement('input', {
+                        type: 'number',
+                        value: editTrimStart,
+                        onChange: (e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setEditTrimStart(val);
+                          if (previewVideoRef) {
+                            previewVideoRef.currentTime = val;
+                          }
+                        },
+                        step: '0.1',
+                        min: '0',
+                        className: 'flex-1 bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500'
+                      }),
+                      React.createElement('button', {
+                        onClick: () => {
+                          if (previewVideoRef) {
+                            setEditTrimStart(parseFloat(previewTime.toFixed(2)));
+                          }
+                        },
+                        className: 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition text-sm whitespace-nowrap'
+                      }, '↓ Use Current Time')
+                    ),
+                    React.createElement('p', { className: 'text-xs text-gray-500 mt-1' }, 'Trim this many seconds from the beginning')
+                  ),
+
+                  React.createElement('div', { className: 'mb-6' },
+                    React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Default Trim End (seconds):'),
+                    React.createElement('div', { className: 'flex gap-2' },
+                      React.createElement('input', {
+                        type: 'number',
+                        value: editTrimEnd,
+                        onChange: (e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setEditTrimEnd(val);
+                          if (previewVideoRef) {
+                            const duration = previewVideoRef.duration;
+                            previewVideoRef.currentTime = duration - val;
+                          }
+                        },
+                        step: '0.1',
+                        min: '0',
+                        className: 'flex-1 bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500'
+                      }),
+                      React.createElement('button', {
+                        onClick: () => {
+                          if (previewVideoRef) {
+                            const duration = previewVideoRef.duration;
+                            const trimEnd = duration - previewTime;
+                            setEditTrimEnd(parseFloat(Math.max(0, trimEnd).toFixed(2)));
+                          }
+                        },
+                        className: 'bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition text-sm whitespace-nowrap'
+                      }, '↓ Use Current Time')
+                    ),
+                    React.createElement('p', { className: 'text-xs text-gray-500 mt-1' }, 'Trim this many seconds from the end')
+                  ),
+
+                  // Crop/Region Selection Section
+                  React.createElement('div', { className: 'mb-6 pt-6 border-t border-gray-700' },
+                    React.createElement('h4', { className: 'text-md font-semibold mb-3 text-gray-300' }, '✂️ Crop/Region Selection'),
+                    React.createElement('p', { className: 'text-xs text-gray-400 mb-3' }, 
+                      'Perfect for split-screen or quad-view videos! Select just the cake you want.'
+                    ),
+                    
+                    // Preset Buttons
+                    React.createElement('div', { className: 'mb-3' },
+                      React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Quick Presets:'),
+                      React.createElement('div', { className: 'grid grid-cols-3 gap-2 mb-2' },
+                        // Quad view presets
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↖ Top Left'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↗ Top Right'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(100); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '⬆ Top Half'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(50); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↙ Bottom Left'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(50); setEditCropWidth(50); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '↘ Bottom Right'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(50); setEditCropWidth(100); setEditCropHeight(50); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '⬇ Bottom Half')
+                      ),
+                      React.createElement('div', { className: 'grid grid-cols-3 gap-2' },
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(100); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, '← Left Half'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(50); setEditCropY(0); setEditCropWidth(50); setEditCropHeight(100); },
+                          className: 'bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-xs transition'
+                        }, 'Right Half →'),
+                        React.createElement('button', {
+                          onClick: () => { setEditCropX(0); setEditCropY(0); setEditCropWidth(100); setEditCropHeight(100); },
+                          className: 'bg-gray-600 hover:bg-gray-500 px-3 py-2 rounded text-xs transition'
+                        }, '⊡ Full Frame')
+                      )
+                    ),
+
+                    // Manual Controls
+                    React.createElement('div', { className: 'space-y-3' },
+                      React.createElement('label', { className: 'block text-sm text-gray-400 mb-2' }, 'Fine-tune (% of frame):'),
+                      React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'X Position:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropX,
+                            onChange: (e) => setEditCropX(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0))),
+                            step: '1',
+                            min: '0',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Y Position:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropY,
+                            onChange: (e) => setEditCropY(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0))),
+                            step: '1',
+                            min: '0',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Width:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropWidth,
+                            onChange: (e) => setEditCropWidth(Math.max(1, Math.min(100, parseFloat(e.target.value) || 100))),
+                            step: '1',
+                            min: '1',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        ),
+                        React.createElement('div', null,
+                          React.createElement('label', { className: 'block text-xs text-gray-500 mb-1' }, 'Height:'),
+                          React.createElement('input', {
+                            type: 'number',
+                            value: editCropHeight,
+                            onChange: (e) => setEditCropHeight(Math.max(1, Math.min(100, parseFloat(e.target.value) || 100))),
+                            step: '1',
+                            min: '1',
+                            max: '100',
+                            className: 'w-full bg-gray-700 text-white px-2 py-1 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
+                          })
+                        )
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'text-sm text-gray-400 bg-gray-900/50 rounded p-3 mb-6' },
+                    previewVideoRef && React.createElement('div', null,
+                      React.createElement('div', null, `Total Duration: ${previewVideoRef.duration?.toFixed(2) || 0}s`),
+                      React.createElement('div', { className: 'text-green-400 font-bold' }, 
+                        `Trimmed Duration: ${((previewVideoRef.duration || 0) - editTrimStart - editTrimEnd).toFixed(2)}s`
+                      )
+                    )
+                  ),
+
+                  React.createElement('div', { className: 'flex gap-3' },
+                    React.createElement('button', {
+                      onClick: handleSaveVideo,
+                      className: 'flex-1 bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg transition font-bold'
+                    }, '✓ Save Changes'),
+                    React.createElement('button', {
+                      onClick: handleCancelEdit,
+                      className: 'flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-3 rounded-lg transition font-bold'
+                    }, '✕ Cancel')
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+
+    // ========================
+    // Show Editor Component
+    // ========================
+    const ShowEditor = ({ 
+      showName,
+      videos,
+      setVideos,
+      downloadedVideos,
+      isPlaying,
+      setIsPlaying,
+      masterTime,
+      setMasterTime,
+      totalDuration,
+      setTotalDuration,
+      zoom,
+      setZoom,
+      draggingId,
+      setDraggingId,
+      dragStartX,
+      setDragStartX,
+      dragStartOffset,
+      setDragStartOffset,
+      gridHeight,
+      setGridHeight,
+      videoRefs,
+      timelineRef,
+      onSave,
+      onBack,
+      onAddFromLibrary,
+      onDownloadComplete
+    }) => {
+      const [saveAsName, setSaveAsName] = React.useState('');
+      const [showSaveAs, setShowSaveAs] = React.useState(false);
+      const [showLibraryAdd, setShowLibraryAdd] = React.useState(false);
+      
+      // Track which videos have loaded their metadata
+      const [loadedVideoIds, setLoadedVideoIds] = React.useState(new Set());
+      
+      // Track buffering progress per video (buffered ranges)
+      const [bufferedRanges, setBufferedRanges] = React.useState(new Map()); // videoId -> { buffered: number, total: number, percentage: number }
+      const [errorVideoIds, setErrorVideoIds] = React.useState(new Set());
+      
+      // Track which videos have at least metadata loaded (readyState >= 1)
+      const [videosWithMetadata, setVideosWithMetadata] = React.useState(new Set());
+      // Track which videos have enough data to play (readyState >= 2)
+      const [videosReadyToPlay, setVideosReadyToPlay] = React.useState(new Set());
+      
+      // Check if videos are ready to play - require HAVE_CURRENT_DATA (readyState >= 2) for ALL videos
+      // This ensures videos have actual frames loaded before playback can start
+      const canStartPlayback = React.useMemo(() => {
+        if (videos.length === 0) return true;
+        
+        // Check ALL videos that have duration (not just active ones)
+        // This ensures all videos are ready before playback starts
+        const videosWithDuration = videos.filter(v => v.duration && v.duration > 0);
+        
+        if (videosWithDuration.length === 0) {
+          // No videos have loaded metadata yet
+          return false;
+        }
+        
+        // Check if all videos with duration have enough data loaded to actually play (readyState >= 2)
+        const allReady = videosWithDuration.every(v => {
+          if (errorVideoIds.has(v.id)) return true; // Errors don't block
+          const videoEl = videoRefs.current[v.id];
+          if (videoEl) {
+            return videoEl.readyState >= 2; // HAVE_CURRENT_DATA or higher (can actually play)
+          }
+          return videosReadyToPlay.has(v.id); // Fallback to tracked state
+        });
+        
+        if (!allReady) {
+          const readyCount = videosWithDuration.filter(v => {
+            if (errorVideoIds.has(v.id)) return true;
+            const videoEl = videoRefs.current[v.id];
+            return videoEl ? videoEl.readyState >= 2 : videosReadyToPlay.has(v.id);
+          }).length;
+          console.log(`[Playback Check] Not ready: ${readyCount}/${videosWithDuration.length} videos ready`);
+        }
+        
+        return allReady;
+      }, [videos, errorVideoIds, videosReadyToPlay]);
+      
+      // Update videosReadyToPlay state when videos reach readyState >= 2
+      React.useEffect(() => {
+        videos.forEach(v => {
+          const videoEl = videoRefs.current[v.id];
+          if (videoEl && videoEl.readyState >= 2 && !videosReadyToPlay.has(v.id)) {
+            setVideosReadyToPlay(prev => new Set(prev).add(v.id));
+          }
+        });
+      }, [videos, videosReadyToPlay]);
+      
+      // Update buffered ranges periodically for visible videos
+      React.useEffect(() => {
+        const interval = setInterval(() => {
+          const newRanges = new Map();
+          videos.forEach(v => {
+            const videoEl = videoRefs.current[v.id];
+            if (videoEl && videoEl.buffered && videoEl.buffered.length > 0) {
+              const bufferedEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
+              const duration = videoEl.duration || v.duration || 0;
+              if (duration > 0) {
+                newRanges.set(v.id, {
+                  buffered: bufferedEnd,
+                  total: duration,
+                  percentage: (bufferedEnd / duration) * 100
+                });
+              }
+            }
+          });
+          if (newRanges.size > 0) {
+            setBufferedRanges(prev => {
+              const updated = new Map(prev);
+              newRanges.forEach((value, key) => updated.set(key, value));
+              return updated;
+            });
+          }
+        }, 500); // Update every 500ms
+        
+        return () => clearInterval(interval);
+      }, [videos]);
+      
+      // YouTube download functionality
+      const [showYoutubeDownload, setShowYoutubeDownload] = React.useState(false);
+      const [youtubeUrl, setYoutubeUrl] = React.useState('');
+      const [downloading, setDownloading] = React.useState([]);
+      const [backendStatus, setBackendStatus] = React.useState(null);
+      const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
+      const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
+      
+      // Detect mobile device (hide YouTube downloads on mobile)
+      const [isMobile, setIsMobile] = React.useState(false);
+      React.useEffect(() => {
+        const checkMobile = () => {
+          const isMobileDevice = window.innerWidth < 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          setIsMobile(isMobileDevice);
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+      }, []);
+
+      React.useEffect(() => {
+        fetch(`${API_BASE}/api/health`)
+          .then(res => res.json())
+          .then(data => setBackendStatus(data))
+          .catch(() => setBackendStatus({ status: 'offline' }));
+      }, []);
+
+      // Poll for download progress (only for server-side downloads)
+      React.useEffect(() => {
+        if (downloading.length === 0) return;
+        
+        // Filter to only server-side downloads (client-side handles its own progress)
+        const serverDownloads = downloading.filter(dl => dl.serverSide === true);
+        if (serverDownloads.length === 0) {
+          console.log('[Polling] No server-side downloads to poll');
+          return;
+        }
+        
+        console.log(`[Polling] Starting to poll ${serverDownloads.length} server-side download(s)...`);
+        
+        const interval = setInterval(async () => {
+          const updates = await Promise.all(
+            serverDownloads.map(async (dl) => {
+              try {
+                console.log(`[Polling] Checking status for download: ${dl.id}`);
+                const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
+                  credentials: 'include'
+                });
+                
+                if (!res.ok) {
+                  console.warn(`[Polling] Status check failed for ${dl.id}: HTTP ${res.status}`);
+                  return dl;
+                }
+                
+                const status = await res.json();
+                console.log(`[Polling] Status for ${dl.id}:`, {
+                  status: status.status,
+                  progress: status.progress,
+                  title: status.title
+                });
+                
+                return { ...dl, ...status };
+              } catch (err) {
+                console.error(`[Polling] Error checking status for ${dl.id}:`, err);
+                return dl;
+              }
+            })
+          );
+          
+          // Update server-side downloads
+          setDownloading(prev => {
+            const clientDownloads = prev.filter(dl => !dl.serverSide);
+            const updatedServerDownloads = updates.filter(dl => dl.status === 'downloading');
+            return [...clientDownloads, ...updatedServerDownloads];
+          });
+          
+          // Notify parent of completed downloads
+          updates
+            .filter(dl => dl.status === 'complete' && dl.filename)
+            .forEach(dl => {
+              console.log(`[Polling] Download complete: ${dl.id} - ${dl.title || dl.filename}`);
+              onDownloadComplete(dl);
+            });
+        }, 1000);
+        
+        return () => {
+          console.log('[Polling] Stopping polling');
+          clearInterval(interval);
+        };
+      }, [downloading, onDownloadComplete]);
+
+      const handleYoutubeDownload = async () => {
+        console.log('[Download] Starting download process...', { url: youtubeUrl });
+        
+        if (!youtubeUrl.trim()) {
+          console.warn('[Download] Empty URL provided');
+          return;
+        }
+        
+        const videoId = extractVideoId(youtubeUrl);
+        console.log('[Download] Extracted video ID:', videoId);
+        
+        if (!videoId) {
+          console.error('[Download] Invalid YouTube URL:', youtubeUrl);
+          alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+          return;
+        }
+        
+        // Use yt-dlp server-side download
+        console.log('[Download] Starting download via yt-dlp...');
+        const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        setDownloading(prev => [...prev, { 
+          id: downloadId, 
+          url: youtubeUrl,
+          videoId: videoId,
+          status: 'downloading',
+          progress: 0,
+          title: 'Starting download...',
+          serverSide: true  // yt-dlp uses polling for progress
+        }]);
+        
+        try {
+          console.log('[Download] Calling yt-dlp endpoint...');
+          const res = await fetch(`${API_BASE}/api/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ url: youtubeUrl })
+          });
+          
+          const data = await res.json();
+          console.log('[Download] yt-dlp response:', data);
+          
+          if (data.error) {
+            console.error('[Download] Download failed:', data.error);
+            alert(`Download failed: ${data.error}`);
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            return;
+          }
+          
+          // Update with actual download ID for polling
+          if (data.id && data.id !== downloadId) {
+            setDownloading(prev => prev.map(dl => 
+              dl.id === downloadId 
+                ? { ...dl, id: data.id, status: 'downloading', serverSide: true }
+                : dl
+            ));
+          }
+          
+          // If download completed immediately (unlikely but possible)
+          if (data.status === 'complete') {
+            console.log('[Download] Download complete!');
+            setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+            onDownloadComplete({
+              id: downloadId,
+              videoId: videoId,
+              filename: data.filename,
+              title: data.title,
+              status: 'complete',
+              localUrl: `${API_BASE}/videos/${data.filename}`
+            });
+            setYoutubeUrl('');
+          }
+          // Otherwise, polling will handle progress updates
+        } catch (err) {
+          console.error('[Download] Download failed:', err);
+          alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
+          setDownloading(prev => prev.filter(dl => dl.id !== downloadId));
+        }
+      };
+
+      const handleVideoLoaded = (id, duration) => {
+        // Mark this video as loaded
+        setLoadedVideoIds(prev => new Set(prev).add(id));
+        
+        setVideos(prev => {
+          const updated = prev.map(v => {
+            if (v.id === id) {
+              // Save duration to library metadata cache if we have filename
+              if (v.filename && duration && duration > 0) {
+                // Save to localStorage for faster subsequent loads
+                try {
+                  const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                  // Create entry if it doesn't exist
+                  if (!libraryData[v.filename]) {
+                    libraryData[v.filename] = {};
+                  }
+                  libraryData[v.filename] = {
+                    ...libraryData[v.filename],
+                    duration
+                  };
+                  localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                  
+                  // Also cache in a separate video metadata cache for quick lookup
+                  const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                  videoMetadataCache[v.filename] = {
+                    duration,
+                    cachedAt: Date.now()
+                  };
+                  localStorage.setItem('fwp_video_metadata_cache', JSON.stringify(videoMetadataCache));
+                } catch (err) {
+                  console.warn('Failed to save duration to localStorage:', err);
+                }
+              }
+              return { ...v, duration };
+            }
+            return v;
+          });
+          // totalDuration will be recalculated automatically by useEffect when videos change
+          return updated;
+        });
+      };
+      
+      // Track which videos have had load() called to prevent duplicate loads
+      const videosLoadCalled = React.useRef(new Set());
+      
+      // Reset loaded/error videos when videos array changes
+      React.useEffect(() => {
+        setLoadedVideoIds(new Set());
+        setErrorVideoIds(new Set());
+        setVideosWithMetadata(new Set());
+        setVideosReadyToPlay(new Set());
+        videosLoadCalled.current = new Set(); // Reset load tracking when videos change
+      }, [videos.length]);
+      
+      // Force videos to start loading even when hidden
+      // Browsers don't load hidden videos even with preload='auto', so we need to explicitly call load()
+      // Only call load() once per video ID to prevent duplicate requests
+      React.useEffect(() => {
+        videos.forEach(video => {
+          const videoEl = videoRefs.current[video.id];
+          if (videoEl && videoEl.readyState === 0 && !videosLoadCalled.current.has(video.id)) {
+            // Video hasn't started loading yet and we haven't called load() - force it to load
+            console.log(`[Video Load] Forcing load for ${video.id} (${video.name})`);
+            videosLoadCalled.current.add(video.id);
+            videoEl.load();
+          }
+        });
+      }, [videos.length]); // Only run when number of videos changes, not on every videos array update
+
+      const getEventX = (e) => {
+        return e.touches ? e.touches[0].clientX : e.clientX;
+      };
+
+      const handleTimelineMouseDown = (e, videoId) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const video = videos.find(v => v.id === videoId);
+        setDraggingId(videoId);
+        setDragStartX(getEventX(e));
+        setDragStartOffset(video.offset);
+      };
+
+      const handleTimelineMove = React.useCallback((e) => {
+        if (!draggingId || !timelineRef.current) return;
+        e.preventDefault();
+        
+        const timelineWidth = timelineRef.current.offsetWidth;
+        const pixelsPerSecond = (timelineWidth * zoom) / totalDuration;
+        const deltaX = getEventX(e) - dragStartX;
+        const deltaTime = deltaX / pixelsPerSecond;
+        const newOffset = Math.max(0, dragStartOffset + deltaTime);
+        
+        setVideos(prev => prev.map(v => 
+          v.id === draggingId ? { ...v, offset: newOffset } : v
+        ));
+      }, [draggingId, dragStartX, dragStartOffset, zoom, totalDuration, setVideos, timelineRef]);
+
+      const handleTimelineUp = React.useCallback((e) => {
+        e.preventDefault();
+        setDraggingId(null);
+      }, [setDraggingId]);
+
+      React.useEffect(() => {
+        if (draggingId) {
+          window.addEventListener('mousemove', handleTimelineMove);
+          window.addEventListener('mouseup', handleTimelineUp);
+          window.addEventListener('touchmove', handleTimelineMove, { passive: false });
+          window.addEventListener('touchend', handleTimelineUp, { passive: false });
+          return () => {
+            window.removeEventListener('mousemove', handleTimelineMove);
+            window.removeEventListener('mouseup', handleTimelineUp);
+            window.removeEventListener('touchmove', handleTimelineMove);
+            window.removeEventListener('touchend', handleTimelineUp);
+          };
+        }
+      }, [draggingId, handleTimelineMove, handleTimelineUp]);
+
+      const handleTimelineClick = (e) => {
+        if (draggingId) return;
+        const rect = timelineRef.current.getBoundingClientRect();
+        const x = getEventX(e) - rect.left;
+        const clickTime = (x / rect.width) * totalDuration / zoom;
+        setMasterTime(Math.max(0, Math.min(clickTime, totalDuration)));
+      };
+
+      const removeVideo = (id) => {
+        const video = videos.find(v => v.id === id);
+        if (video?.url?.startsWith('blob:')) URL.revokeObjectURL(video.url);
+        setVideos(prev => prev.filter(v => v.id !== id));
+      };
+
+      const updateOffset = (id, newOffset) => {
+        setVideos(prev => prev.map(v => 
+          v.id === id ? { ...v, offset: Math.max(0, parseFloat(newOffset) || 0) } : v
+        ));
+      };
+
+      const updateTrimStart = (id, newTrimStart) => {
+        setVideos(prev => prev.map(v => {
+          if (v.id !== id) return v;
+          const trimEnd = v.trimEnd || 0;
+          const trimStart = Math.max(0, Math.min(parseFloat(newTrimStart) || 0, v.duration - trimEnd - 0.1));
+          return { ...v, trimStart };
+        }));
+      };
+
+      const updateTrimEnd = (id, newTrimEnd) => {
+        setVideos(prev => prev.map(v => {
+          if (v.id !== id) return v;
+          const trimStart = v.trimStart || 0;
+          const trimEnd = Math.max(0, Math.min(parseFloat(newTrimEnd) || 0, v.duration - trimStart - 0.1));
+          return { ...v, trimEnd };
+        }));
+      };
+
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds % 1) * 10);
+        return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
+      };
+
+      const handleSave = () => {
+        if (showName) {
+          onSave(showName);
+        } else {
+          setShowSaveAs(true);
+        }
+      };
+
+      const handleSaveAs = () => {
+        if (saveAsName.trim()) {
+          onSave(saveAsName.trim());
+          setSaveAsName('');
+          setShowSaveAs(false);
+        }
+      };
+
+      // Detect mobile and portrait mode
+      const [isPortrait, setIsPortrait] = React.useState(false);
+      React.useEffect(() => {
+        const checkOrientation = () => {
+          setIsPortrait(window.innerHeight > window.innerWidth && window.innerWidth < 768);
+        };
+        checkOrientation();
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', checkOrientation);
+        return () => {
+          window.removeEventListener('resize', checkOrientation);
+          window.removeEventListener('orientationchange', checkOrientation);
+        };
+      }, []);
+
+      // Recalculate totalDuration whenever videos change
+      React.useEffect(() => {
+        if (videos.length === 0) {
+          setTotalDuration(60);
+          return;
+        }
+        
+        // Filter out videos without valid durations
+        const videosWithDuration = videos.filter(v => v.duration && v.duration > 0);
+        
+        if (videosWithDuration.length === 0) {
+          setTotalDuration(60);
+          return;
+        }
+        
+        const maxEnd = Math.max(...videosWithDuration.map(v => {
+          const trimStart = v.trimStart || 0;
+          const trimEnd = v.trimEnd || 0;
+          const trimmedDuration = v.duration - trimStart - trimEnd;
+          return (v.offset || 0) + trimmedDuration;
+        }));
+        
+        // Set totalDuration to max end time + 10 seconds buffer, minimum 60
+        if (maxEnd > 0 && isFinite(maxEnd)) {
+          setTotalDuration(Math.max(60, maxEnd + 10));
+        }
+      }, [videos]);
+
+      // Compute filtered videos (only active ones currently playing) - memoized for performance
+      const filteredVideos = React.useMemo(() => {
+        if (videos.length === 0) return [];
+        
+        return videos.filter(video => {
+          try {
+            // If duration is 0 or not set, show the video (it's still loading)
+            if (!video.duration || video.duration === 0) {
+              return true;
+            }
+            
+            const trimStart = video.trimStart || 0;
+            const trimEnd = video.trimEnd || 0;
+            const videoTime = masterTime - (video.offset || 0);
+            const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+            
+            // Show if currently playing (within trimmed duration)
+            return videoTime >= 0 && videoTime <= trimmedDuration;
+          } catch (err) {
+            console.error('Error filtering video:', video, err);
+            return false;
+          }
+        });
+      }, [videos, masterTime]);
+
+      // Count active videos for header - memoized
+      const activeVideos = React.useMemo(() => {
+        return videos.filter(video => {
+          try {
+            if (!video.duration || video.duration === 0) return false;
+            const trimStart = video.trimStart || 0;
+            const trimEnd = video.trimEnd || 0;
+            const videoTime = masterTime - (video.offset || 0);
+            const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+            return videoTime >= 0 && videoTime <= trimmedDuration;
+          } catch (err) {
+            return false;
+          }
+        });
+      }, [videos, masterTime]);
+
+      try {
+        return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col' },
+        // Portrait mode warning
+        isPortrait && React.createElement('div', { className: 'bg-yellow-600 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center' },
+          '📱 Tip: Rotate to landscape for the best editing experience!'
+        ),
+        // Header
+        React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-4 gap-2' },
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4' },
+            React.createElement('button', {
+              onClick: onBack,
+              className: 'bg-gray-700 hover:bg-gray-600 px-4 py-3 md:py-2 rounded transition text-base md:text-sm'
+            }, '← Back to Dashboard'),
+            React.createElement('div', null,
+              React.createElement('h1', { className: 'text-xl md:text-2xl font-bold text-orange-400' }, 
+                showName ? `Editing: ${showName}` : 'New Show'
+              )
+            )
+          ),
+          React.createElement('div', { className: 'flex flex-wrap gap-2' },
+            // YouTube download button (hidden on mobile)
+            !isMobile && React.createElement('button', {
+              onClick: () => setShowYoutubeDownload(!showYoutubeDownload),
+              className: `px-4 py-3 md:py-2 rounded transition text-base md:text-sm ${showYoutubeDownload ? 'bg-orange-600 border-2 border-orange-400' : 'bg-orange-500 hover:bg-orange-600'}`
+            }, '📥 YouTube'),
+            React.createElement('button', {
+              onClick: () => setShowLibraryAdd(!showLibraryAdd),
+              className: 'bg-green-600 hover:bg-green-700 px-4 py-3 md:py-2 rounded transition text-base md:text-sm'
+            }, '+ Add from Library'),
+            showName
+              ? React.createElement('button', {
+                  onClick: handleSave,
+                  className: 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold'
+                }, '💾 Save')
+              : React.createElement('button', {
+                  onClick: () => setShowSaveAs(true),
+                  className: 'bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold'
+                }, '💾 Save As...')
+          )
+        ),
+
+        // Save As Dialog
+        showSaveAs && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4' },
+            React.createElement('h3', { className: 'text-xl font-bold mb-4' }, 'Save Show As'),
+            React.createElement('input', {
+              type: 'text',
+              value: saveAsName,
+              onChange: (e) => setSaveAsName(e.target.value),
+              placeholder: 'Enter show name...',
+              className: 'w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4',
+              onKeyDown: (e) => e.key === 'Enter' && handleSaveAs(),
+              autoFocus: true
+            }),
+            React.createElement('div', { className: 'flex gap-2' },
+              React.createElement('button', {
+                onClick: handleSaveAs,
+                disabled: !saveAsName.trim(),
+                className: 'flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 px-4 py-2 rounded transition'
+              }, 'Save'),
+              React.createElement('button', {
+                onClick: () => { setShowSaveAs(false); setSaveAsName(''); },
+                className: 'flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded transition'
+              }, 'Cancel')
+            )
+          )
+        ),
+
+        // YouTube Download Panel (hidden on mobile)
+        showYoutubeDownload && !isMobile && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4' },
+            React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+              React.createElement('h3', { className: 'text-xl font-bold text-orange-300' }, '📥 Download from YouTube'),
+              React.createElement('button', {
+                onClick: () => setShowYoutubeDownload(false),
+                className: 'bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded'
+              }, '✕')
+            ),
+            
+            backendStatus?.status === 'ok' 
+              ? React.createElement('div', { className: 'text-xs text-green-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-green-400 rounded-full' }),
+                  `Connected • yt-dlp ${backendStatus.ytdlp_version}`
+                )
+              : React.createElement('div', { className: 'text-xs text-red-400 flex items-center gap-2 mb-3' },
+                  React.createElement('span', { className: 'w-2 h-2 bg-red-400 rounded-full' }),
+                  'Backend offline - start server.py'
+                ),
+            
+            React.createElement('div', { className: 'space-y-3' },
+              React.createElement('div', { className: 'flex gap-2' },
+                React.createElement('input', {
+                  type: 'text',
+                  value: youtubeUrl,
+                  onChange: (e) => setYoutubeUrl(e.target.value),
+                  placeholder: 'Paste YouTube URL...',
+                  className: 'flex-1 bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500',
+                  onKeyDown: (e) => e.key === 'Enter' && handleYoutubeDownload()
+                }),
+                React.createElement('button', {
+                  onClick: handleYoutubeDownload,
+                  disabled: !youtubeUrl.trim() || backendStatus?.status !== 'ok',
+                  className: 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold'
+                }, 'Download')
+              ),
+
+              downloading.length > 0 && React.createElement('div', { className: 'space-y-2' },
+                downloading.map(dl => 
+                  React.createElement('div', { key: dl.id, className: 'bg-gray-700/50 rounded p-2' },
+                    React.createElement('div', { className: 'flex justify-between text-xs mb-1' },
+                      React.createElement('span', { className: 'truncate' }, dl.title || 'Downloading...'),
+                      React.createElement('span', null, `${Math.round(dl.progress || 0)}%`)
+                    ),
+                    React.createElement('div', { className: 'h-2 bg-gray-600 rounded overflow-hidden' },
+                      React.createElement('div', {
+                        className: 'h-full bg-orange-500 transition-all',
+                        style: { width: `${dl.progress || 0}%` }
+                      })
+                    )
+                  )
+                )
+              ),
+
+              React.createElement('div', { className: 'pt-3 border-t border-gray-700' },
+                React.createElement('button', {
+                  onClick: () => setShowYoutubePanel(!showYoutubePanel),
+                  className: 'text-sm text-blue-400 hover:text-blue-300 underline'
+                }, showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube')
+              ),
+
+              showYoutubePanel && React.createElement('div', { className: 'bg-gray-900/50 rounded-lg p-3 border border-blue-500/30' },
+                React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Search YouTube in new tab:'),
+                React.createElement('input', {
+                  type: 'text',
+                  value: youtubeSearchQuery,
+                  onChange: (e) => setYoutubeSearchQuery(e.target.value),
+                  placeholder: 'e.g., fireworks display...',
+                  className: 'w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2',
+                  onKeyDown: (e) => {
+                    if (e.key === 'Enter' && youtubeSearchQuery.trim()) {
+                      window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                    }
+                  }
+                }),
+                React.createElement('button', {
+                  onClick: () => {
+                    if (youtubeSearchQuery.trim()) {
+                      window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`, '_blank');
+                    }
+                  },
+                  className: 'w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition'
+                }, '🔍 Search on YouTube')
+              )
+            )
+          )
+        ),
+
+        // Add from Library Dialog
+        showLibraryAdd && React.createElement('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50' },
+          React.createElement('div', { className: 'bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto' },
+            React.createElement('div', { className: 'flex items-center justify-between mb-4' },
+              React.createElement('h3', { className: 'text-xl font-bold' }, '📚 Add from Library'),
+              React.createElement('button', {
+                onClick: () => setShowLibraryAdd(false),
+                className: 'bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded'
+              }, '✕')
+            ),
+            downloadedVideos.size === 0 
+              ? React.createElement('p', { className: 'text-gray-500 text-center py-8' }, 'No videos in library')
+              : React.createElement('div', { className: 'space-y-2' },
+                  Array.from(downloadedVideos.values()).map(video =>
+                    React.createElement('div', {
+                      key: video.filename,
+                      className: 'bg-gray-700 rounded p-3 hover:bg-gray-600 transition cursor-pointer',
+                      onClick: () => {
+                        onAddFromLibrary(video);
+                        setShowLibraryAdd(false);
+                      }
+                    },
+                      React.createElement('div', { className: 'font-medium text-sm' }, video.title),
+                      React.createElement('div', { className: 'text-xs text-gray-400' }, video.filename),
+                      (video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && React.createElement('div', { className: 'text-xs text-yellow-400 mt-1' },
+                        `Default trim: ${video.defaultTrimStart.toFixed(1)}s - ${video.defaultTrimEnd.toFixed(1)}s`
+                      )
+                    )
+                  )
+                )
+          )
+        ),
+
+        // Hidden video preloader - ensures all videos load enough data to play
+        // Deduplicate by filename/URL to avoid loading the same video multiple times
+        // Uses 'auto' preload to load actual video data, not just metadata
+        // Use visibility/positioning instead of display:none so videos can actually load
+        React.createElement('div', { 
+          style: { 
+            position: 'absolute',
+            left: '-9999px',
+            top: '-9999px',
+            width: '1px',
+            height: '1px',
+            overflow: 'hidden',
+            visibility: 'hidden',
+            pointerEvents: 'none'
+          } 
+        },
+          (() => {
+            // Get unique videos that need preloading (all videos, even if they have cached duration)
+            // We need to ensure video data is loaded, not just metadata
+            const videosNeedingPreload = videos.filter(v => v.url);
+            const uniqueVideos = new Map();
+            
+            // Group by filename (preferred) or URL (fallback)
+            videosNeedingPreload.forEach(video => {
+              const key = video.filename || video.url;
+              if (key && !uniqueVideos.has(key)) {
+                uniqueVideos.set(key, video);
+              }
+            });
+            
+            return Array.from(uniqueVideos.values()).map(video => {
+              const key = video.filename || video.url;
+              return React.createElement('video', {
+                key: `preload-${key}`,
+                src: video.url,
+                preload: 'auto', // Load actual video data, not just metadata
+                onLoadedMetadata: (e) => {
+                  try {
+                    const duration = e.target.duration;
+                    if (duration && duration > 0) {
+                      console.log(`[Video Preloader] Loaded duration ${duration.toFixed(2)}s for ${video.filename || video.url}`);
+                      // Update all video instances with this filename/URL
+                      // Use setVideos to get current state and update all matching videos
+                      setVideos(prev => {
+                        const updated = prev.map(v => {
+                          const vKey = v.filename || v.url;
+                          if (vKey === key && (!v.duration || v.duration === 0)) {
+                            // Mark as loaded
+                            setLoadedVideoIds(loadedIds => new Set(loadedIds).add(v.id));
+                            
+                            // Mark as having metadata loaded
+                            setVideosWithMetadata(prev => new Set(prev).add(v.id));
+                            
+                            // Save duration to library metadata cache if we have filename
+                            if (v.filename && duration && duration > 0) {
+                              try {
+                                const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+                                if (!libraryData[v.filename]) {
+                                  libraryData[v.filename] = {};
+                                }
+                                libraryData[v.filename] = {
+                                  ...libraryData[v.filename],
+                                  duration
+                                };
+                                localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+                                
+                                // Also cache in video metadata cache
+                                const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                                videoMetadataCache[v.filename] = {
+                                  duration,
+                                  cachedAt: Date.now()
+                                };
+                                localStorage.setItem('fwp_video_metadata_cache', JSON.stringify(videoMetadataCache));
+                              } catch (err) {
+                                console.warn('Failed to save duration to localStorage:', err);
+                              }
+                            }
+                            
+                            return { ...v, duration };
+                          }
+                          return v;
+                        });
+                        return updated;
+                      });
+                      
+                    }
+                  } catch (err) {
+                    console.error(`[Video Preloader] Error loading metadata for ${key}:`, err);
+                  }
+                },
+                onCanPlay: (e) => {
+                  // Video has enough data loaded to play - mark all instances as ready
+                  console.log(`[Video Preloader] Video ready to play: ${video.filename || video.url}, readyState: ${e.target.readyState}`);
+                  // Mark all video instances with this filename/URL as ready
+                  setVideos(prev => {
+                    prev.forEach(v => {
+                      const vKey = v.filename || v.url;
+                      if (vKey === key) {
+                        setVideosReadyToPlay(prev => new Set(prev).add(v.id));
+                      }
+                    });
+                    return prev; // Don't modify, just trigger the check
+                  });
+                },
+                onError: (e) => {
+                  console.error(`[Video Preloader] Failed to load video for ${video.filename || video.url}:`, video.url, e);
+                  // Mark all instances of this video as having an error so they don't block loading
+                  setVideos(prev => {
+                    prev.forEach(v => {
+                      const vKey = v.filename || v.url;
+                      if (vKey === key) {
+                        setErrorVideoIds(errorIds => new Set(errorIds).add(v.id));
+                      }
+                    });
+                    return prev; // Don't modify, just trigger the check
+                  });
+                }
+              });
+            });
+          })()
+        ),
+
+        // Video Grid Section
+        React.createElement('div', { className: 'mb-4' },
+          React.createElement('div', { className: 'flex flex-col md:flex-row items-start md:items-center justify-between mb-2 gap-2' },
+            React.createElement('h2', { className: 'font-semibold text-gray-300 text-sm md:text-base' }, 
+              `Video Grid (${activeVideos.length} playing / ${videos.length} total)`
+            )
+          ),
+          React.createElement('div', { 
+            className: 'gap-2 bg-gray-900 rounded-lg p-2 flex items-center justify-center',
+            style: { 
+              minHeight: '200px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)', // Fixed 4 columns wide
+              alignContent: 'start', // Align to start so videos stack naturally
+              alignItems: 'center', // Center videos horizontally
+              justifyItems: 'center', // Center grid items
+              gap: '0.5rem' // Consistent gap between videos
+            }
+          },
+          videos.length === 0
+            ? React.createElement('div', { className: 'col-span-full flex items-center justify-center border-2 border-dashed border-gray-600 rounded-lg' },
+                React.createElement('div', { className: 'text-center text-gray-400' },
+                  React.createElement('p', { className: 'text-lg mb-2' }, 'No videos loaded'),
+                  React.createElement('p', { className: 'text-sm' }, 'Use "Add from Library" to add videos to your timeline')
+                )
+              )
+            : videos.map(video => {
+                const trimStart = video.trimStart || 0;
+                const trimEnd = video.trimEnd || 0;
+                const videoTime = masterTime - (video.offset || 0);
+                const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+                const isActive = video.duration && video.duration > 0 && videoTime >= 0 && videoTime <= trimmedDuration;
+                const isInTimeframe = videoTime >= 0 && videoTime <= trimmedDuration;
+                
+                // Only show videos that are in the current timeframe (filtered)
+                // But render ALL videos so refs are set for sync loop
+                const shouldShow = isInTimeframe;
+                
+                // Debug: log if video doesn't have URL
+                if (!video.url) {
+                  console.warn(`Video ${video.name || video.id} missing URL:`, video);
+                }
+                
+                return React.createElement('div', {
+                  key: video.id,
+                  className: 'relative bg-black rounded-lg overflow-hidden border-2 transition-colors flex items-center justify-center w-full',
+                  style: { 
+                    borderColor: isActive ? video.color : '#374151',
+                    width: '100%', // Fill grid cell width
+                    // Always render videos (for refs) but hide inactive ones
+                    // Use pointer-events: none on hidden videos to prevent interaction issues
+                    visibility: shouldShow ? 'visible' : 'hidden',
+                    opacity: shouldShow ? 1 : 0,
+                    pointerEvents: shouldShow ? 'auto' : 'none',
+                    position: shouldShow ? 'relative' : 'absolute',
+                    // Position hidden videos off-screen but still render them
+                    ...(shouldShow ? {} : { left: '-9999px', top: '-9999px', zIndex: -1 })
+                  }
+                },
+                      video.url 
+                    ? React.createElement('video', {
+                        ref: el => {
+                          if (el) {
+                            videoRefs.current[video.id] = el;
+                            // Don't call load() here - let the useEffect handle it to avoid duplicate calls
+                          }
+                        },
+                        src: video.url,
+                        className: 'w-full h-auto object-contain', // Use object-contain to preserve aspect ratio, width fills container
+                        style: {
+                          maxWidth: '100%',
+                          // Preserve natural aspect ratio - don't force dimensions
+                          clipPath: `inset(${video.cropY || 0}% ${100 - (video.cropX || 0) - (video.cropWidth || 100)}% ${100 - (video.cropY || 0) - (video.cropHeight || 100)}% ${video.cropX || 0}%)`
+                        },
+                        onLoadedMetadata: (e) => {
+                          try {
+                            const duration = e.target.duration;
+                            if (duration && duration > 0) {
+                              console.log(`[Video Metadata] Loaded duration ${duration.toFixed(2)}s for video ${video.id} (${video.name})`);
+                              handleVideoLoaded(video.id, duration);
+                              
+                              // Seek to start position to show first frame (like library editor does)
+                              const trimStart = video.trimStart || 0;
+                              // Just show the start frame initially - the sync loop will handle positioning
+                              e.target.currentTime = trimStart;
+                            } else {
+                              console.warn(`[Video Metadata] Invalid duration ${duration} for video ${video.id} (${video.name})`);
+                            }
+                          } catch (err) {
+                            console.error(`[Video Metadata] Error in onLoadedMetadata for ${video.id}:`, err);
+                          }
+                        },
+                        onError: (e) => {
+                          console.error(`Failed to load video ${video.name}:`, video.url, e);
+                          // Mark video as having an error so it doesn't block loading screen
+                          setErrorVideoIds(prev => new Set(prev).add(video.id));
+                        },
+                        onCanPlay: (e) => {
+                          console.log(`[Video] ${video.id} can play:`, video.url, `readyState: ${e.target.readyState}`);
+                          // Video has enough data to play - mark as ready
+                          setVideosReadyToPlay(prev => new Set(prev).add(video.id));
+                        },
+                        onPlay: () => {
+                          console.log(`[Video] ${video.id} started playing`);
+                        },
+                        onPause: () => {
+                          console.log(`[Video] ${video.id} paused`);
+                        },
+                        onWaiting: () => {
+                          console.log(`[Video] ${video.id} waiting for data`);
+                        },
+                        onLoadedData: () => {
+                          try {
+                            const videoEl = videoRefs.current[video.id];
+                            console.log(`[Video] ${video.id} loaded data, readyState:`, videoEl?.readyState);
+                            // Ensure first frame is shown - just set to trimStart, sync loop will handle positioning
+                            if (videoEl && videoEl.readyState >= 2) {
+                              const trimStart = video.trimStart || 0;
+                              videoEl.currentTime = trimStart;
+                            }
+                          } catch (err) {
+                            console.error(`[Video] Error in onLoadedData for ${video.id}:`, err);
+                          }
+                        },
+                        crossOrigin: 'anonymous',
+                        preload: 'auto',
+                        playsInline: true,
+                        muted: false // Don't mute - we want audio
+                      })
+                    : React.createElement('div', { 
+                        className: 'flex items-center justify-center h-full text-gray-500 text-sm' 
+                      }, `No video URL (filename: ${video.filename || 'unknown'})`),
+                  React.createElement('div', {
+                    className: 'absolute top-2 left-2 px-2 py-1 rounded text-sm font-medium max-w-[60%] truncate',
+                    style: { backgroundColor: video.color }
+                  }, video.name),
+                  React.createElement('button', {
+                    onClick: () => removeVideo(video.id),
+                    className: 'absolute top-2 right-2 bg-red-600 hover:bg-red-700 w-6 h-6 rounded flex items-center justify-center text-sm'
+                  }, '×'),
+                  React.createElement('div', { className: 'absolute bottom-2 left-2 right-2 bg-black/80 px-2 py-1 rounded space-y-1' },
+                    React.createElement('div', { className: 'flex items-center gap-2' },
+                      React.createElement('span', { className: 'text-xs' }, 'Start:'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: video.offset.toFixed(1),
+                        onChange: (e) => updateOffset(video.id, e.target.value),
+                        className: 'w-16 md:w-14 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, 's')
+                    ),
+                    React.createElement('div', { className: 'flex items-center gap-1' },
+                      React.createElement('span', { className: 'text-xs' }, 'Trim:'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: trimStart.toFixed(1),
+                        onChange: (e) => updateTrimStart(video.id, e.target.value),
+                        className: 'w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, '↔'),
+                      React.createElement('input', {
+                        type: 'number',
+                        value: trimEnd.toFixed(1),
+                        onChange: (e) => updateTrimEnd(video.id, e.target.value),
+                        className: 'w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded',
+                        step: '0.1',
+                        min: '0'
+                      }),
+                      React.createElement('span', { className: 'text-xs text-gray-400' }, 's'),
+                      React.createElement('span', { className: 'text-xs text-gray-500 ml-auto' }, 
+                        `${(trimmedDuration || 0).toFixed(1)}s`)
+                    )
+                  )
+                );
+              })
+          )
+        ),
+
+        // Transport Controls
+        React.createElement('div', { className: 'bg-gray-800 rounded-lg p-4 mb-4' },
+          React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
+            React.createElement('button', {
+              onClick: () => setMasterTime(0),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
+            }, '⏮ Reset'),
+            React.createElement('button', {
+              onClick: () => setMasterTime(prev => Math.max(0, prev - 1)),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
+            }, '-1s'),
+            React.createElement('button', {
+              onClick: () => {
+                if (!canStartPlayback && !isPlaying) {
+                  showToast('Videos are still loading. Please wait...', 'warning');
+                  return;
+                }
+                setIsPlaying(!isPlaying);
+              },
+              disabled: !canStartPlayback && !isPlaying,
+              className: `px-6 py-3 md:py-2 rounded font-bold text-base md:text-sm ${
+                !canStartPlayback && !isPlaying
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  : isPlaying 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : 'bg-green-600 hover:bg-green-700'
+              }`
+            }, !canStartPlayback && !isPlaying ? '⏳ Loading...' : (isPlaying ? '⏸ Pause' : '▶ Play')),
+            React.createElement('button', {
+              onClick: () => setMasterTime(prev => Math.min(totalDuration, prev + 1)),
+              className: 'bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm'
+            }, '+1s'),
+            React.createElement('div', { className: 'text-xl font-mono ml-4' },
+              `${formatTime(masterTime)} / ${formatTime(totalDuration)}`
+            )
+          ),
+          React.createElement('input', {
+            type: 'range',
+            min: '0',
+            max: totalDuration,
+            step: '0.1',
+            value: masterTime,
+            onChange: (e) => setMasterTime(parseFloat(e.target.value)),
+            className: 'w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-500'
+          })
+        ),
+
+        // Timeline
+        React.createElement('div', { className: 'bg-gray-800 rounded-lg p-4' },
+          React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+            React.createElement('h2', { className: 'font-semibold' }, 'Timeline'),
+            React.createElement('div', { className: 'flex items-center gap-4' },
+              React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('span', { className: 'text-sm text-gray-400' }, 'Duration:'),
+                React.createElement('input', {
+                  type: 'number',
+                  value: totalDuration,
+                  onChange: (e) => setTotalDuration(Math.max(10, parseFloat(e.target.value) || 60)),
+                  className: 'w-16 bg-gray-700 text-white text-sm px-2 py-1 rounded',
+                  min: '10'
+                }),
+                React.createElement('span', { className: 'text-sm' }, 'sec')
+              ),
+              React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('span', { className: 'text-sm text-gray-400 whitespace-nowrap' }, 'Zoom:'),
+                React.createElement('input', {
+                  type: 'range',
+                  min: '0.5',
+                  max: '4',
+                  step: '0.1',
+                  value: zoom,
+                  onChange: (e) => setZoom(parseFloat(e.target.value)),
+                  className: 'w-24 md:w-32'
+                }),
+                React.createElement('span', { className: 'text-sm text-gray-300 whitespace-nowrap w-10' }, `${zoom.toFixed(1)}x`)
+              )
+            )
+          ),
+          React.createElement('div', { className: 'relative h-6 mb-1 overflow-hidden' },
+            Array.from({ length: Math.ceil(totalDuration / 5) + 1 }, (_, i) =>
+              React.createElement('div', {
+                key: i,
+                className: 'absolute text-xs text-gray-500',
+                style: { left: `${(i * 5 / totalDuration) * 100 * zoom}%` }
+              }, `${i * 5}s`)
+            )
+          ),
+          React.createElement('div', {
+            ref: timelineRef,
+            className: 'relative bg-gray-900 rounded overflow-x-auto cursor-pointer touch-pan-x',
+            style: { minHeight: Math.max(100, videos.length * 50 + 20) },
+            onClick: handleTimelineClick,
+            onTouchStart: (e) => {
+              if (!draggingId) {
+                handleTimelineClick(e);
+              }
+            }
+          },
+            React.createElement('div', {
+              className: 'absolute top-0 bottom-0 w-0.5 bg-red-500 z-20 pointer-events-none',
+              style: { left: `${(masterTime / totalDuration) * 100 * zoom}%` }
+            },
+              React.createElement('div', {
+                className: 'absolute -top-1 -left-2 w-0 h-0 border-l-4 border-r-4 border-t-8 border-transparent border-t-red-500'
+              })
+            ),
+            videos.map((video, index) => {
+              const trimStart = video.trimStart || 0;
+              const trimEnd = video.trimEnd || 0;
+              // Only calculate if video has valid duration
+              const trimmedDuration = (video.duration && video.duration > 0) 
+                ? Math.max(0, video.duration - trimStart - trimEnd)
+                : 0;
+              
+              // Skip rendering if no valid duration
+              if (!video.duration || video.duration <= 0) {
+                return React.createElement('div', {
+                  key: video.id,
+                  className: 'absolute h-10 md:h-8 rounded cursor-move flex items-center px-2 text-xs font-medium overflow-hidden whitespace-nowrap transition-shadow hover:shadow-lg no-select touch-none opacity-50',
+                  style: {
+                    top: index * 50 + 10,
+                    left: `${((video.offset || 0) / totalDuration) * 100 * zoom}%`,
+                    width: '60px',
+                    backgroundColor: video.color || '#666',
+                    minWidth: '60px',
+                    touchAction: 'none'
+                  },
+                  onMouseDown: (e) => handleTimelineMouseDown(e, video.id),
+                  onTouchStart: (e) => handleTimelineMouseDown(e, video.id)
+                }, `${video.name} (loading...)`);
+              }
+              
+              const bufferedInfo = bufferedRanges.get(video.id);
+              const bufferedPercentage = bufferedInfo ? bufferedInfo.percentage : 0;
+              const isBuffering = bufferedPercentage < 100 && bufferedPercentage > 0;
+              const videoEl = videoRefs.current[video.id];
+              const hasMetadata = videoEl ? videoEl.readyState >= 1 : videosWithMetadata.has(video.id);
+              const isReadyToPlay = videoEl ? videoEl.readyState >= 2 : videosReadyToPlay.has(video.id);
+              const isLoading = !isReadyToPlay && !errorVideoIds.has(video.id);
+              
+              return React.createElement('div', {
+                key: video.id,
+                className: 'absolute h-10 md:h-8 rounded cursor-move flex flex-col overflow-hidden transition-shadow hover:shadow-lg no-select touch-none',
+                style: {
+                  top: index * 50 + 10,
+                  left: `${((video.offset || 0) / totalDuration) * 100 * zoom}%`,
+                  width: `${(trimmedDuration / totalDuration) * 100 * zoom}%`,
+                  backgroundColor: video.color,
+                  minWidth: '60px',
+                  touchAction: 'none',
+                  opacity: isLoading ? 0.5 : 1
+                },
+                onMouseDown: (e) => handleTimelineMouseDown(e, video.id),
+                onTouchStart: (e) => handleTimelineMouseDown(e, video.id)
+              },
+                // Loading indicator (no metadata yet)
+                isLoading ? React.createElement('div', {
+                  className: 'absolute inset-0 flex items-center justify-center bg-black/30 z-20'
+                }, React.createElement('div', { className: 'text-[10px] text-white' }, 'Loading...')) : null,
+                // Buffering progress bar overlay
+                isBuffering ? React.createElement('div', {
+                  className: 'absolute top-0 left-0 h-1 bg-white/40 transition-all z-10',
+                  style: {
+                    width: `${bufferedPercentage}%`
+                  }
+                }) : null,
+                // Video name and duration
+                React.createElement('div', {
+                  className: 'flex items-center px-2 text-xs font-medium whitespace-nowrap h-full relative z-10',
+                  style: { color: '#fff', textShadow: '1px 1px 2px rgba(0,0,0,0.8)' }
+                }, 
+                  `${video.name} (${trimmedDuration.toFixed(1)}s)`,
+                  isBuffering ? React.createElement('span', { className: 'ml-1 text-[10px] opacity-75' }, `[${Math.round(bufferedPercentage)}%]`) : null
+                )
+              );
+            })
+          ),
+          React.createElement('p', { className: 'text-xs text-gray-500 mt-2' },
+            'Drag clips to adjust timing • Click timeline to seek'
+          )
+        ),
+
+        // Cue Sheet
+        videos.length > 0 && React.createElement('div', { className: 'mt-4 bg-gray-800 rounded-lg p-4' },
+          React.createElement('h3', { className: 'font-semibold mb-2' }, 'Show Timing Cue Sheet'),
+          React.createElement('div', { className: 'grid gap-1 text-sm font-mono' },
+            [...videos]
+              .sort((a, b) => a.offset - b.offset)
+              .map(video => {
+                const trimStart = video.trimStart || 0;
+                const trimEnd = video.trimEnd || 0;
+                const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+                return React.createElement('div', { key: video.id, className: 'flex gap-2' },
+                  React.createElement('span', { style: { color: video.color } }, '●'),
+                  React.createElement('span', { className: 'text-gray-400 w-16' }, formatTime(video.offset)),
+                  React.createElement('span', null, video.name),
+                  React.createElement('span', { className: 'text-gray-500' }, `(${(trimmedDuration || 0).toFixed(1)}s)`)
+                );
+              })
+          )
+        )
+      );
+      } catch (err) {
+        console.error('Error rendering ShowEditor:', err);
+        return React.createElement('div', { className: 'min-h-screen bg-gray-900 text-white p-4' },
+          React.createElement('h1', { className: 'text-red-500 text-xl mb-4' }, 'Error in Show Editor'),
+          React.createElement('pre', { className: 'bg-gray-800 p-4 rounded overflow-auto' }, 
+            err.message + '\n' + err.stack
+          )
+        );
+      }
+    };
+
+    // ======================
+    // Main App Component
+    // ======================
+    const FireworksPlanner = () => {
+      // Authentication state
+      const [authenticated, setAuthenticated] = React.useState(false);
+      const [currentUser, setCurrentUser] = React.useState(null);
+      const [checkingAuth, setCheckingAuth] = React.useState(true);
+      
+      const [currentView, setCurrentView] = React.useState('dashboard'); // 'dashboard', 'library', 'editor'
+      const [currentShowName, setCurrentShowName] = React.useState(null);
+      
+      const [videos, setVideos] = React.useState([]);
+      const [downloadedVideos, setDownloadedVideos] = React.useState(new Map());
+      const [isPlaying, setIsPlaying] = React.useState(false);
+      const [masterTime, setMasterTime] = React.useState(0);
+      const [totalDuration, setTotalDuration] = React.useState(60);
+      const [zoom, setZoom] = React.useState(1);
+      const [draggingId, setDraggingId] = React.useState(null);
+      const [dragStartX, setDragStartX] = React.useState(0);
+      const [dragStartOffset, setDragStartOffset] = React.useState(0);
+      
+      const [savedSessions, setSavedSessions] = React.useState([]);
+      const [gridHeight, setGridHeight] = React.useState(400);
+      const [toasts, setToasts] = React.useState([]);
+      
+      const videoRefs = React.useRef({});
+      const timelineRef = React.useRef(null);
+      const animationRef = React.useRef(null);
+      const lastTimeRef = React.useRef(Date.now());
+      const isPlayingRef = React.useRef(false);
+
+      const showToast = (message, type = 'info') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        }, 3000);
+      };
+
+      // Check authentication on mount
+      React.useEffect(() => {
+        checkAuth();
+      }, []);
+
+      // Load data when authenticated
+      React.useEffect(() => {
+        if (authenticated) {
+          loadSessionsList();
+          loadAvailableVideos();
+          
+          const savedGridHeight = localStorage.getItem('fwp_gridHeight');
+          if (savedGridHeight) {
+            setGridHeight(parseInt(savedGridHeight));
+          }
+        }
+      }, [authenticated]);
+
+      // Reload library when returning to dashboard
+      React.useEffect(() => {
+        if (authenticated && currentView === 'dashboard') {
+          loadAvailableVideos();
+        }
+      }, [currentView, authenticated]);
+
+      const checkAuth = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/auth/me`, {
+            credentials: 'include'
+          });
+          const data = await res.json();
+          
+          if (data.authenticated && data.user) {
+            setAuthenticated(true);
+            setCurrentUser(data.user);
+            // Clean up OAuth redirect URL if present
+            const hash = window.location.hash;
+            if (hash.includes('#/dashboard') || hash.includes('error=')) {
+              window.history.replaceState({}, document.title, window.location.pathname + '#/dashboard');
+            }
+          } else {
+            setAuthenticated(false);
+            setCurrentUser(null);
+          }
+        } catch (err) {
+          console.error('Auth check failed:', err);
+          setAuthenticated(false);
+        } finally {
+          setCheckingAuth(false);
+        }
+      };
+
+      const handleLogin = (user) => {
+        setAuthenticated(true);
+        setCurrentUser(user);
+        showToast(`Welcome, ${user.username}!`, 'success');
+      };
+
+      const handleLogout = async () => {
+        try {
+          await fetch(`${API_BASE}/api/auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+          });
+        } catch (err) {
+          console.error('Logout error:', err);
+        }
+        
+        setAuthenticated(false);
+        setCurrentUser(null);
+        setSavedSessions([]);
+        setDownloadedVideos(new Map());
+        setVideos([]);
+        setCurrentView('dashboard');
+        showToast('Logged out', 'info');
+      };
+
+      const loadSessionsList = async () => {
+        // Only load from server if authenticated
+        if (!authenticated) {
+          // Not authenticated - use localStorage (though user shouldn't see this)
+          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+          setSavedSessions(sessions);
+          return;
+        }
+        
+        try {
+          const res = await fetch(`${API_BASE}/api/shows`, {
+            credentials: 'include'
+          });
+          if (res.ok) {
+            const sessions = await res.json();
+            setSavedSessions(sessions.map(s => ({
+              name: s.name,
+              timestamp: s.timestamp,
+              totalDuration: s.data.totalDuration || 60,
+              zoom: s.data.zoom || 1,
+              videos: s.data.videos || []
+            })));
+          } else {
+            // Server error - show empty (don't fallback to localStorage for authenticated users)
+            console.error('Failed to load shows from server:', res.status);
+            setSavedSessions([]);
+          }
+        } catch (err) {
+          console.error('Failed to load shows from server:', err);
+          // Network error - show empty (don't fallback to localStorage for authenticated users)
+          setSavedSessions([]);
+        }
+      };
+
+      const loadAvailableVideos = async () => {
+        // Only load from server if authenticated
+        const videoMap = new Map();
+        
+        // Load from server if authenticated
+        if (authenticated) {
+          try {
+            const videosRes = await fetch(`${API_BASE}/api/videos`, {
+              credentials: 'include'
+            });
+            if (videosRes.ok) {
+              const serverVideos = await videosRes.json();
+              
+              // Load library metadata from server
+              let serverLibrary = {};
+              try {
+                const libraryRes = await fetch(`${API_BASE}/api/library`, {
+                  credentials: 'include'
+                });
+                if (libraryRes.ok) {
+                  serverLibrary = await libraryRes.json();
+                }
+              } catch (e) {
+                console.warn('Failed to load library from server:', e);
+              }
+              
+              serverVideos.forEach(video => {
+                // Add all videos from server
+                if (!videoMap.has(video.filename)) {
+                  const savedData = serverLibrary[video.filename] || {};
+                  videoMap.set(video.filename, {
+                    filename: video.filename,
+                    title: savedData.title || video.title || video.filename,
+                    url: `${API_BASE}/videos/${video.filename}`,
+                    sourceUrl: savedData.sourceUrl || null,
+                    size: video.size,
+                    duration: savedData.duration || video.duration || null, // Try savedData first, then video object, then null
+                    defaultTrimStart: savedData.defaultTrimStart || 0,
+                    defaultTrimEnd: savedData.defaultTrimEnd || 0,
+                    defaultCropX: savedData.defaultCropX || 0,
+                    defaultCropY: savedData.defaultCropY || 0,
+                    defaultCropWidth: savedData.defaultCropWidth || 100,
+                    defaultCropHeight: savedData.defaultCropHeight || 100
+                  });
+                }
+              });
+            }
+          } catch (err) {
+            console.warn('Failed to load videos from server:', err);
+          }
+        }
+        
+        setDownloadedVideos(videoMap);
+      };
+
+      const saveLibraryMetadata = async (videos) => {
+        const libraryData = {};
+        videos.forEach((video, filename) => {
+          libraryData[filename] = {
+            title: video.title,
+            sourceUrl: video.sourceUrl,
+            duration: video.duration,
+            defaultTrimStart: video.defaultTrimStart || 0,
+            defaultTrimEnd: video.defaultTrimEnd || 0,
+            defaultCropX: video.defaultCropX || 0,
+            defaultCropY: video.defaultCropY || 0,
+            defaultCropWidth: video.defaultCropWidth || 100,
+            defaultCropHeight: video.defaultCropHeight || 100
+          };
+        });
+        
+        // Save to localStorage (fallback)
+        localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+        
+        // Sync to server
+        if (authenticated) {
+          try {
+            for (const [filename, metadata] of Object.entries(libraryData)) {
+              await fetch(`${API_BASE}/api/library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ filename, metadata })
+              });
+            }
+          } catch (err) {
+            console.warn('Failed to sync library to server:', err);
+          }
+        }
+      };
+
+      const handleNewShow = () => {
+        setCurrentShowName(null);
+        setVideos([]);
+        setMasterTime(0);
+        setTotalDuration(60);
+        setZoom(1);
+        setIsPlaying(false);
+        setCurrentView('editor');
+      };
+
+      const handleEditShow = async (showName) => {
+        let session = null;
+        
+        // Try to load from server first
+        if (authenticated) {
+          try {
+            const res = await fetch(`${API_BASE}/api/shows`, {
+              credentials: 'include'
+            });
+            if (res.ok) {
+              const shows = await res.json();
+              const foundShow = shows.find(s => s.name === showName);
+              if (foundShow) {
+                session = {
+                  name: foundShow.name,
+                  timestamp: foundShow.timestamp,
+                  totalDuration: foundShow.data.totalDuration || 60,
+                  zoom: foundShow.data.zoom || 1,
+                  videos: foundShow.data.videos || []
+                };
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to load show from server:', err);
+          }
+        }
+        
+        // Fallback to localStorage
+        if (!session) {
+          const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+          session = sessions.find(s => s.name === showName);
+        }
+        
+        if (!session) {
+          showToast('Session not found', 'error');
+          return;
+        }
+
+        // Clean up existing videos
+        videos.forEach(v => {
+          if (v.url && v.url.startsWith('blob:')) {
+            URL.revokeObjectURL(v.url);
+          }
+        });
+        
+        // Clear video refs to ensure fresh initialization
+        Object.keys(videoRefs.current).forEach(key => {
+          delete videoRefs.current[key];
+        });
+
+        // Restore video URLs - always reconstruct from API_BASE and filename to ensure correct environment
+        const restoredVideos = session.videos
+          .filter(v => v.filename)
+          .map(v => {
+            // Try to find video in downloadedVideos map to get URL (may be blob URL for local videos)
+            const libraryVideo = downloadedVideos.get(v.filename);
+            
+            // Always reconstruct URL from current API_BASE and filename, or use library URL if it's a blob URL
+            // This ensures URLs work across different environments (localhost vs production)
+            let videoUrl = null;
+            if (libraryVideo && libraryVideo.url) {
+              // If library has a blob URL (local video), use it; otherwise reconstruct from API_BASE
+              if (libraryVideo.url.startsWith('blob:')) {
+                videoUrl = libraryVideo.url;
+              } else {
+                videoUrl = `${API_BASE}/videos/${v.filename}`;
+              }
+            } else if (v.filename) {
+              // Always reconstruct from API_BASE - don't trust saved URLs
+              videoUrl = `${API_BASE}/videos/${v.filename}`;
+            }
+            
+            // Use duration from saved show, library cache, or video metadata cache
+            // Prefer cached duration for faster loading, but verify it's still valid
+            let duration = 0;
+            
+            // Try saved show duration first
+            if (v.duration && v.duration > 0) {
+              duration = v.duration;
+            } 
+            // Try library video duration
+            else if (libraryVideo && libraryVideo.duration && libraryVideo.duration > 0) {
+              duration = libraryVideo.duration;
+            }
+            // Try video metadata cache (separate cache for quick lookup)
+            else {
+              try {
+                const videoMetadataCache = JSON.parse(localStorage.getItem('fwp_video_metadata_cache') || '{}');
+                const cached = videoMetadataCache[v.filename];
+                if (cached && cached.duration && cached.duration > 0) {
+                  // Use cached duration if it's less than 7 days old
+                  const cacheAge = Date.now() - (cached.cachedAt || 0);
+                  if (cacheAge < 7 * 24 * 60 * 60 * 1000) {
+                    duration = cached.duration;
+                    console.log(`[Show Load] Using cached duration for ${v.filename}: ${duration.toFixed(2)}s`);
+                  }
+                }
+              } catch (err) {
+                console.warn('Failed to read video metadata cache:', err);
+              }
+            }
+            
+            // If duration is still 0, metadata preloader will load it
+            
+            return {
+              ...v,
+              url: videoUrl,
+              duration: duration, // Use cached duration if available, otherwise 0 (will be loaded)
+              // Ensure we have an id
+              id: v.id || `${v.filename || 'video'}-${Date.now()}-${Math.random()}`
+            };
+          })
+          .filter(v => v.url);
+
+        setVideos(restoredVideos);
+        setTotalDuration(session.totalDuration || 60);
+        setZoom(session.zoom || 1);
+        setMasterTime(0);
+        setIsPlaying(false);
+        setCurrentShowName(showName);
+        
+        // Switch to editor view - loading modal will show if videos need metadata
+        // Note: Loading states (loadedVideoIds, readyVideoIds, errorVideoIds) are managed inside ShowEditor component
+        setCurrentView('editor');
+        
+        // Show toast after a brief delay to not interfere with loading modal
+        setTimeout(() => {
+          showToast(`Loaded "${showName}"`, 'success');
+        }, 100);
+      };
+
+      const handleBackToDashboard = () => {
+        if (currentShowName && videos.length > 0) {
+          saveShow(currentShowName, true);
+        }
+        setCurrentView('dashboard');
+        setIsPlaying(false);
+        loadSessionsList();
+      };
+
+      const handleGoToLibrary = () => {
+        setCurrentView('library');
+        loadAvailableVideos();
+      };
+
+      const handleBackFromLibrary = () => {
+        setCurrentView('dashboard');
+        loadAvailableVideos();
+      };
+
+      const handleDeleteShow = async (name) => {
+        // Delete from localStorage
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        const filtered = sessions.filter(s => s.name !== name);
+        localStorage.setItem('fwp_sessions', JSON.stringify(filtered));
+        
+        // Delete from server
+        if (authenticated) {
+          try {
+            await fetch(`${API_BASE}/api/shows/${encodeURIComponent(name)}`, {
+              method: 'DELETE',
+              credentials: 'include'
+            });
+          } catch (err) {
+            console.warn('Failed to delete show from server:', err);
+          }
+        }
+        
+        loadSessionsList();
+        showToast(`Deleted show "${name}"`, 'success');
+      };
+
+      const handleDownloadComplete = async (dl) => {
+        // Check if this is a server-side download
+        // Server-side downloads have filename and status='complete' but no localUrl or videoId from IndexedDB
+        const isServerSideDownload = dl.filename && dl.status === 'complete' && !dl.localUrl && (!dl.videoId || dl.serverSide);
+        
+        if (isServerSideDownload) {
+          // Server-side download: Refresh library from server to get the new video
+          console.log('[Download Complete] Server-side download detected, refreshing library from server...');
+          // Small delay to ensure server has finished processing
+          setTimeout(async () => {
+            await loadAvailableVideos();
+            showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+          }, 500);
+          return;
+        }
+        
+        showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
+      };
+
+      const handleDeleteVideo = async (video) => {
+        try {
+          await fetch(`${API_BASE}/api/videos/${video.filename}`, {
+            method: 'DELETE',
+            credentials: 'include'
+          });
+          
+          setDownloadedVideos(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(video.filename);
+            saveLibraryMetadata(newMap);
+            return newMap;
+          });
+
+          setVideos(prev => prev.filter(v => v.filename !== video.filename));
+          showToast(`"${video.title}" deleted`, 'success');
+        } catch (err) {
+          showToast('Failed to delete video: ' + err.message, 'error');
+        }
+      };
+
+      const handleSaveVideoSettings = async (filename, updates) => {
+        setDownloadedVideos(prev => {
+          const newMap = new Map(prev);
+          const existing = newMap.get(filename);
+          if (existing) {
+            const updated = { ...existing, ...updates };
+            newMap.set(filename, updated);
+            
+            // Prepare metadata
+            const metadata = {
+              title: updated.title,
+              sourceUrl: updated.sourceUrl,
+              duration: updated.duration,
+              defaultTrimStart: updated.defaultTrimStart || 0,
+              defaultTrimEnd: updated.defaultTrimEnd || 0,
+              defaultCropX: updated.defaultCropX || 0,
+              defaultCropY: updated.defaultCropY || 0,
+              defaultCropWidth: updated.defaultCropWidth || 100,
+              defaultCropHeight: updated.defaultCropHeight || 100
+            };
+            
+            // Save this specific video's metadata to server
+            if (authenticated) {
+              fetch(`${API_BASE}/api/library`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ filename, metadata })
+              })
+              .then(res => {
+                if (!res.ok) {
+                  return res.json().then(err => {
+                    throw new Error(err.error || `Server error: ${res.status}`);
+                  });
+                }
+                return res.json();
+              })
+              .then(data => {
+                if (data.success) {
+                  console.log('Video settings saved successfully');
+                }
+              })
+              .catch(err => {
+                console.error('Failed to save video settings:', err);
+                showToast(`Failed to save settings: ${err.message}`, 'error');
+              });
+            }
+            
+            // Also save to localStorage as backup
+            const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
+            libraryData[filename] = metadata;
+            localStorage.setItem('fwp_library', JSON.stringify(libraryData));
+          }
+          return newMap;
+        });
+        showToast('Video settings saved', 'success');
+      };
+
+      const handleAddFromLibrary = (videoData) => {
+        // Use duration from library, but if it's null/0/undefined, we'll load it from video metadata
+        const initialDuration = (videoData.duration && videoData.duration > 0) ? videoData.duration : 0;
+        
+        const newInstance = {
+          id: `${videoData.filename}-${Date.now()}`,
+          name: videoData.title || videoData.filename,
+          filename: videoData.filename,
+          url: videoData.url,
+          sourceUrl: videoData.sourceUrl,
+          offset: 0,
+          duration: initialDuration, // Will be updated by handleVideoLoaded when video metadata loads
+          volume: 1.0,
+          trimStart: videoData.defaultTrimStart || 0,
+          trimEnd: videoData.defaultTrimEnd || 0,
+          cropX: videoData.defaultCropX || 0,
+          cropY: videoData.defaultCropY || 0,
+          cropWidth: videoData.defaultCropWidth || 100,
+          cropHeight: videoData.defaultCropHeight || 100,
+          color: `hsl(${videos.length * 60}, 70%, 50%)`
+        };
+        
+        console.log(`[AddFromLibrary] Adding video:`, {
+          name: newInstance.name,
+          filename: newInstance.filename,
+          libraryDuration: videoData.duration,
+          initialDuration: initialDuration,
+          url: newInstance.url
+        });
+        
+        setVideos(prev => [...prev, newInstance]);
+        
+        // If duration is missing, try to load it from the video element
+        // This will happen automatically when the video element renders and fires onLoadedMetadata
+        // But we can also proactively try to get it if the video is already in downloadedVideos
+        if (!initialDuration && videoData.url) {
+          // Create a temporary video element to load duration
+          const tempVideo = document.createElement('video');
+          tempVideo.preload = 'metadata';
+          tempVideo.src = videoData.url;
+          tempVideo.crossOrigin = 'anonymous';
+          
+          tempVideo.addEventListener('loadedmetadata', () => {
+            const duration = tempVideo.duration;
+            if (duration && duration > 0) {
+              console.log(`[AddFromLibrary] Loaded duration from video element: ${duration}s for ${newInstance.name}`);
+              setVideos(prev => prev.map(v => 
+                v.id === newInstance.id ? { ...v, duration } : v
+              ));
+            }
+            tempVideo.remove();
+          });
+          
+          tempVideo.addEventListener('error', () => {
+            console.warn(`[AddFromLibrary] Failed to load metadata for ${newInstance.name}`);
+            tempVideo.remove();
+          });
+          
+          tempVideo.load();
+        }
+      };
+
+      const saveShow = async (name, silent = false) => {
+        if (!name || !name.trim()) {
+          if (!silent) showToast('Please enter a show name', 'warning');
+          return;
+        }
+
+        const sessionData = {
+          totalDuration,
+          zoom,
+          videos: videos.map(v => ({
+            id: v.id,
+            name: v.name,
+            filename: v.filename,
+            // Don't save URL - it will be reconstructed from API_BASE and filename when loading
+            // This ensures URLs work across different environments (localhost vs production)
+            url: null,
+            offset: v.offset,
+            duration: v.duration,
+            volume: v.volume,
+            trimStart: v.trimStart || 0,
+            trimEnd: v.trimEnd || 0,
+            cropX: v.cropX || 0,
+            cropY: v.cropY || 0,
+            cropWidth: v.cropWidth || 100,
+            cropHeight: v.cropHeight || 100,
+            color: v.color
+          }))
+        };
+
+        // Save to localStorage (fallback)
+        const session = {
+          name: name.trim(),
+          timestamp: new Date().toISOString(),
+          ...sessionData
+        };
+        const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
+        const existingIndex = sessions.findIndex(s => s.name === name.trim());
+        
+        if (existingIndex >= 0) {
+          sessions[existingIndex] = session;
+        } else {
+          sessions.push(session);
+        }
+
+        localStorage.setItem('fwp_sessions', JSON.stringify(sessions));
+        localStorage.setItem('fwp_lastSession', name.trim());
+
+        // Sync to server
+        if (authenticated) {
+          try {
+            await fetch(`${API_BASE}/api/shows`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                name: name.trim(),
+                data: sessionData
+              })
+            });
+          } catch (err) {
+            console.warn('Failed to sync show to server:', err);
+          }
+        }
+
+        loadSessionsList();
+        setCurrentShowName(name.trim());
+        if (!silent) {
+          showToast(`Show "${name.trim()}" saved!`, 'success');
+        }
+      };
+
+      // Track previous video state to detect actual changes (not just metadata updates)
+      const prevVideosStateRef = React.useRef(null);
+      
+      // Auto-save when editing (debounced, only on actual video property changes)
+      React.useEffect(() => {
+        if (currentView === 'editor' && currentShowName && videos.length > 0) {
+          // Only auto-save if at least some videos have loaded (have duration > 0)
+          // This prevents saving during the initial metadata loading phase
+          const hasAnyVideosLoaded = videos.some(v => v.duration && v.duration > 0);
+          if (!hasAnyVideosLoaded) {
+            return; // Don't auto-save while no videos have loaded
+          }
+          
+          // Create a serialized state of video properties (excluding duration/url which change on metadata load)
+          const currentVideosState = JSON.stringify(videos.map(v => ({
+            id: v.id,
+            filename: v.filename,
+            offset: v.offset,
+            trimStart: v.trimStart,
+            trimEnd: v.trimEnd,
+            cropX: v.cropX,
+            cropY: v.cropY,
+            cropWidth: v.cropWidth,
+            cropHeight: v.cropHeight,
+            volume: v.volume,
+            color: v.color
+          })).sort((a, b) => a.id.localeCompare(b.id))); // Sort for consistent comparison
+          
+          // Also include totalDuration and zoom in the state
+          const fullState = JSON.stringify({
+            videos: currentVideosState,
+            totalDuration,
+            zoom
+          });
+          
+          // Only save if state actually changed (not just metadata updates)
+          if (fullState === prevVideosStateRef.current) {
+            return; // No actual changes, skip save
+          }
+          
+          // Update ref for next comparison
+          prevVideosStateRef.current = fullState;
+          
+          // Debounce auto-save to prevent excessive API calls
+          const timeoutId = setTimeout(() => {
+            saveShow(currentShowName, true);
+          }, 15000); // 15 seconds debounce
+          
+          return () => clearTimeout(timeoutId);
+        } else {
+          // Reset state tracking when leaving editor or no show name
+          prevVideosStateRef.current = null;
+        }
+      }, [currentView, currentShowName, videos, totalDuration, zoom, saveShow]);
+
+      // Update ref whenever isPlaying changes
+      React.useEffect(() => {
+        isPlayingRef.current = isPlaying;
+        console.log(`[Playback] isPlaying changed to: ${isPlaying}, totalDuration: ${totalDuration}`);
+      }, [isPlaying, totalDuration]);
+
+      // Video playback sync
+      React.useEffect(() => {
+        if (isPlaying && totalDuration > 0) {
+          console.log(`[Playback] Starting playback loop, totalDuration: ${totalDuration}`);
+          lastTimeRef.current = Date.now();
+          
+          const tick = () => {
+            // Check if still playing using ref (always current)
+            if (!isPlayingRef.current) {
+              if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+                animationRef.current = null;
+              }
+              return;
+            }
+            
+            const now = Date.now();
+            const delta = (now - lastTimeRef.current) / 1000;
+            lastTimeRef.current = now;
+            
+            setMasterTime(prev => {
+              const next = prev + delta;
+              if (next >= totalDuration) {
+                isPlayingRef.current = false;
+                setIsPlaying(false);
+                return totalDuration;
+              }
+              return next;
+            });
+            
+            animationRef.current = requestAnimationFrame(tick);
+          };
+          
+          animationRef.current = requestAnimationFrame(tick);
+        } else {
+          console.log(`[Playback] Stopping playback loop, isPlaying: ${isPlaying}, totalDuration: ${totalDuration}`);
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+            animationRef.current = null;
+          }
+        }
+        
+        return () => {
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+            animationRef.current = null;
+          }
+        };
+      }, [isPlaying, totalDuration]);
+
+      React.useEffect(() => {
+        console.log(`[Video Sync] Running sync, masterTime: ${masterTime.toFixed(2)}, isPlaying: ${isPlaying}, videos count: ${videos.length}`);
+        let activeCount = 0;
+        let playedCount = 0;
+        
+        videos.forEach(video => {
+          const videoEl = videoRefs.current[video.id];
+          if (!videoEl) {
+            // Video not rendered yet (filtered out or not loaded)
+            return;
+          }
+          
+          // Skip if video doesn't have a valid duration yet
+          if (!video.duration || video.duration <= 0) {
+            return;
+          }
+          
+          videoEl.volume = video.volume || 1.0;
+          
+          const trimStart = video.trimStart || 0;
+          const trimEnd = video.trimEnd || 0;
+          const videoTime = masterTime - (video.offset || 0);
+          const trimmedDuration = video.duration - trimStart - trimEnd;
+          
+          if (trimmedDuration <= 0) return; // Invalid trim settings
+          
+          if (videoTime >= 0 && videoTime <= trimmedDuration) {
+            activeCount++;
+            const actualVideoTime = videoTime + trimStart;
+            
+            // Always ensure currentTime is set when video becomes active (to show first frame)
+            // Only sync if paused or way off (don't interrupt playback)
+            if (videoEl.paused) {
+              // When paused, always sync to show correct frame
+              if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+                videoEl.currentTime = actualVideoTime;
+                console.log(`[Video Sync] Setting ${video.id} to ${actualVideoTime.toFixed(2)}s (paused, showing frame)`);
+              }
+            } else if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.5) {
+              // When playing, only sync if way off
+              videoEl.currentTime = actualVideoTime;
+              console.log(`[Video Sync] Syncing ${video.id} to ${actualVideoTime.toFixed(2)}s (was ${videoEl.currentTime.toFixed(2)}s)`);
+            }
+            
+            if (isPlaying && videoEl.paused) {
+              // Check if video is ready to play
+              if (videoEl.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+                // Ensure video is visible (some browsers require visibility for playback)
+                const videoContainer = videoEl.parentElement;
+                if (videoContainer) {
+                  const computedStyle = window.getComputedStyle(videoContainer);
+                  if (computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.warn(`[Video Sync] Video ${video.id} container is hidden, making visible for playback`);
+                    videoContainer.style.visibility = 'visible';
+                    videoContainer.style.opacity = '1';
+                  }
+                }
+                
+                // Ensure currentTime is set before playing (but don't interrupt if already close)
+                if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
+                  videoEl.currentTime = actualVideoTime;
+                }
+                
+                // Ensure volume is set
+                videoEl.volume = video.volume || 1.0;
+                
+                // Ensure not muted (unless volume is 0)
+                if (video.volume > 0) {
+                  videoEl.muted = false;
+                }
+                
+                console.log(`[Video Sync] Attempting to play ${video.id} at ${actualVideoTime.toFixed(2)}s, readyState: ${videoEl.readyState}`);
+                const playPromise = videoEl.play();
+                if (playPromise !== undefined) {
+                  playPromise.then(() => {
+                    playedCount++;
+                    // Verify video is actually playing after a short delay
+                    setTimeout(() => {
+                      if (videoEl.paused) {
+                        console.warn(`[Video Sync] ⚠ Video ${video.id} paused immediately after play() call`);
+                        console.warn(`  - readyState: ${videoEl.readyState}, networkState: ${videoEl.networkState}`);
+                        console.warn(`  - currentTime: ${videoEl.currentTime}, duration: ${videoEl.duration}`);
+                        console.warn(`  - error: ${videoEl.error ? videoEl.error.message : 'none'}`);
+                      } else {
+                        console.log(`[Video Sync] ✓ Video ${video.id} is playing at ${videoEl.currentTime.toFixed(2)}s`);
+                      }
+                    }, 100);
+                  }).catch(err => {
+                    console.error(`[Video Sync] ✗ Failed to play ${video.id} (${video.name || 'unnamed'}):`, err);
+                    console.error('Video element state:', {
+                      paused: videoEl.paused,
+                      readyState: videoEl.readyState,
+                      networkState: videoEl.networkState,
+                      src: videoEl.src,
+                      currentSrc: videoEl.currentSrc,
+                      currentTime: videoEl.currentTime,
+                      duration: videoEl.duration,
+                      error: videoEl.error ? videoEl.error.message : null,
+                      visible: videoEl.offsetParent !== null,
+                      display: window.getComputedStyle(videoEl).display
+                    });
+                  });
+                }
+              } else {
+                console.warn(`[Video Sync] Video ${video.id} not ready (readyState: ${videoEl.readyState}), waiting...`);
+              }
+            } else if (!isPlaying && !videoEl.paused) {
+              videoEl.pause();
+            }
+          } else {
+            if (!videoEl.paused) videoEl.pause();
+            if (videoTime < 0) videoEl.currentTime = trimStart;
+          }
+        });
+        
+        if (isPlaying && activeCount > 0) {
+          console.log(`[Video Sync] ${activeCount} videos active, ${playedCount} attempted to play`);
+          // Log which videos are actually playing vs paused
+          videos.forEach(video => {
+            const videoEl = videoRefs.current[video.id];
+            if (videoEl) {
+              const videoTime = masterTime - (video.offset || 0);
+              const trimStart = video.trimStart || 0;
+              const trimEnd = video.trimEnd || 0;
+              const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
+              if (videoTime >= 0 && videoTime <= trimmedDuration) {
+                if (videoEl.paused && isPlaying) {
+                  console.warn(`[Video Sync] ⚠ Video ${video.id} should be playing but is paused!`);
+                }
+              }
+            }
+          });
+        }
+      }, [masterTime, videos, isPlaying]);
+
+      // Show loading while checking auth
+      if (checkingAuth) {
+        return React.createElement('div', { 
+          className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center' 
+        },
+          React.createElement('div', { className: 'text-center' },
+            React.createElement('div', { className: 'text-4xl mb-4' }, '🎆'),
+            React.createElement('p', { className: 'text-gray-400' }, 'Loading...')
+          )
+        );
+      }
+
+      // Show login if not authenticated
+      if (!authenticated) {
+        return React.createElement(LoginView, { onLogin: handleLogin });
+      }
+
+      return React.createElement('div', null,
+        currentView === 'dashboard' 
+          ? React.createElement(Dashboard, {
+              onEditShow: handleEditShow,
+              onNewShow: handleNewShow,
+              onGoToLibrary: handleGoToLibrary,
+              savedSessions,
+              onDeleteShow: handleDeleteShow,
+              downloadedVideos,
+              onDownloadComplete: handleDownloadComplete,
+              currentUser,
+              onLogout: handleLogout
+            })
+          : currentView === 'library'
+          ? React.createElement(LibraryView, {
+              downloadedVideos,
+              setDownloadedVideos,
+              onBack: handleBackFromLibrary,
+              onDeleteVideo: handleDeleteVideo,
+              onSaveVideoSettings: handleSaveVideoSettings,
+              onDownloadComplete: handleDownloadComplete
+            })
+          : React.createElement(ShowEditor, {
+              showName: currentShowName,
+              videos,
+              setVideos,
+              downloadedVideos,
+              isPlaying,
+              setIsPlaying,
+              masterTime,
+              setMasterTime,
+              totalDuration,
+              setTotalDuration,
+              zoom,
+              setZoom,
+              draggingId,
+              setDraggingId,
+              dragStartX,
+              setDragStartX,
+              dragStartOffset,
+              setDragStartOffset,
+              gridHeight,
+              setGridHeight,
+              videoRefs,
+              timelineRef,
+              onSave: saveShow,
+              onBack: handleBackToDashboard,
+              onAddFromLibrary: handleAddFromLibrary,
+              onDownloadComplete: handleDownloadComplete
+            }),
+
+        // Toast Notifications
+        React.createElement('div', {
+          className: 'fixed top-4 right-4 z-50 flex flex-col gap-2',
+          style: { maxWidth: '400px' }
+        },
+          toasts.map(toast => {
+            const bgColor = toast.type === 'error' ? 'bg-red-600' : 
+                           toast.type === 'success' ? 'bg-green-600' : 
+                           toast.type === 'warning' ? 'bg-yellow-600' : 
+                           'bg-blue-600';
+            const icon = toast.type === 'error' ? '❌' : 
+                        toast.type === 'success' ? '✅' : 
+                        toast.type === 'warning' ? '⚠️' : 
+                        'ℹ️';
+            
+            return React.createElement('div', {
+              key: toast.id,
+              className: `${bgColor} text-white px-4 py-3 rounded-lg shadow-lg flex items-start gap-2`
+            },
+              React.createElement('span', { className: 'text-lg' }, icon),
+              React.createElement('span', { className: 'flex-1 text-sm' }, toast.message)
+            );
+          })
+        )
+      );
+    };
+
+    try {
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(React.createElement(FireworksPlanner));
+    } catch (error) {
+      console.error('Failed to render app:', error);
+      document.getElementById('root').innerHTML = `
+        <div style="padding: 20px; color: red;">
+          <h1>Error Loading Application</h1>
+          <p>${error.message}</p>
+          <pre>${error.stack}</pre>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>
