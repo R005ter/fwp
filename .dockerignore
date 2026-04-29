@@ -1,0 +1,53 @@
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+.DS_Store
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+venv
+env
+ENV
+*.egg-info
+
+# Project artifacts
+backend/videos/*.mp4
+backend/videos/*.webm
+backend/videos/*.mkv
+backend/videos/*.mov
+backend/videos/*.avi
+backend/videos/*.m4a
+backend/youtube_cookies.txt
+backend/fireworks.db
+*.log
+
+# Local env / docs
+.env
+.env.local
+*.md
+!README.md
+
+# Windows / build artifacts not needed in image
+*.bat
+*.ps1
+*.spec
+build_executable.py
+local_client.py
+local_client_config.py
+start_local_client.py
+start_with_logging.py
+start_with_monitoring.py
+run_local_client.bat
+test_supabase_connection.py
+example_notebook.ipynb
+cleaned_show.json
+"mygeo [mygeo].json"
+frontend/index-old.html
+frontend/index-monolith.html.bak
+frontend/src/App-old.jsx.bak
+frontend/node_modules
+frontend/dist

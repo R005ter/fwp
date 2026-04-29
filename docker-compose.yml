@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fwp
+      POSTGRES_PASSWORD: fwp
+      POSTGRES_DB: fwp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fwp -d fwp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://fwp:fwp@postgres:5432/fwp
+    ports:
+      # macOS AirPlay Receiver squats on :5000, so expose on :5050.
+      - "5050:5000"
+    volumes:
+      - videos_data:/app/backend/videos
+
+volumes:
+  postgres_data:
+  videos_data:

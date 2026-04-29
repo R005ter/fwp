@@ -11,16 +11,41 @@ A local application for planning and timing your fireworks show by synchronizing
 - **Synchronized Playback**: All videos play together with a master clock
 - **Cue Sheet**: Auto-generated timing list for your show
 
-## Quick Start
+## Quick Start (Docker)
+
+This is the easiest path — one command and everything is up.
+
+```bash
+cp .env.example .env
+# Edit .env to add GOOGLE_CLIENT_ID/SECRET if you want Google login.
+# R2 keys are optional; without them, videos save to a local Docker volume.
+
+docker compose up -d --build
+```
+
+App is at http://localhost:5050. Postgres runs in the bundled `postgres` container; data persists in the `postgres_data` volume. Videos persist in `videos_data`.
+
+To rebuild after code changes:
+```bash
+docker compose up -d --build
+```
+
+To wipe data and start fresh:
+```bash
+docker compose down -v
+```
+
+## Quick Start (Native Python — legacy)
 
 ### Prerequisites
 
-1. **Python 3.8+** - [Download here](https://www.python.org/downloads/)
+1. **Python 3.11** - [Download here](https://www.python.org/downloads/)
 2. **FFmpeg** - Required for merging video and audio from YouTube
    ```powershell
    # Install FFmpeg for yt-dlp
    winget install yt-dlp.FFmpeg
    ```
+3. **Postgres** - You'll need a local or hosted Postgres and a `DATABASE_URL` in `.env`.
 
 ### Installation
 
