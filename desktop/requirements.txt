@@ -1,9 +1,17 @@
-pywebview>=5.0
+# Cross-platform deps
+pywebview>=5.0 ; sys_platform != "linux"
 yt-dlp>=2025.1.1
 requests~=2.31
-# imageio-ffmpeg bundles a static ffmpeg binary inside the wheel, so the
-# packaged app doesn't depend on the user installing ffmpeg separately.
+# imageio-ffmpeg bundles a static ffmpeg binary inside the wheel so the
+# packaged app doesn't depend on the user installing ffmpeg system-wide.
 imageio-ffmpeg~=0.5
+
+# Linux: pull pywebview's Qt extra so PyWebView has a backend it can find
+# inside the PyInstaller bundle. The default GTK backend depends on system-
+# provided GObject Introspection typelibs that PyInstaller can't reliably
+# bundle into a portable AppImage; Qt ships its own libraries via PyQt6.
+pywebview[qt]>=5.0 ; sys_platform == "linux"
+
 # pyinstaller and pyinstaller-hooks-contrib are dev dependencies; install
 # before building binaries:
 #   pip install pyinstaller pyinstaller-hooks-contrib

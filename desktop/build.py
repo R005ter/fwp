@@ -49,6 +49,15 @@ def main() -> int:
         "--collect-all", "webview",
     ]
 
+    # Linux: bundle PyQt6 so PyWebView has a backend at runtime. Native
+    # webviews on Mac (WebKit) and Windows (WebView2) are provided by the OS,
+    # so no extra Python bindings need bundling there.
+    if system == "Linux":
+        cmd += [
+            "--collect-all", "PyQt6",
+            "--collect-all", "qtpy",
+        ]
+
     if system == "Darwin":
         # macOS: build a .app bundle (PyInstaller produces a proper bundle
         # when --windowed is set; --onedir is implicit for .app).
