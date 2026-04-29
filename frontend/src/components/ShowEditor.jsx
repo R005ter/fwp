@@ -32,6 +32,8 @@ const ShowEditor = ({
   onAddFromLibrary,
   onDownloadComplete,
   showToast = noopToast,
+  isReadOnly = false,
+  ownerLabel = null,
 }) => {
   const [saveAsName, setSaveAsName] = React.useState('');
   const [showSaveAs, setShowSaveAs] = React.useState(false);
@@ -373,6 +375,12 @@ const ShowEditor = ({
   };
 
   const handleSave = () => {
+    // Read-only (admin viewing another user's show): force Save-As so the
+    // admin explicitly forks under a new name instead of stomping the owner.
+    if (isReadOnly) {
+      setShowSaveAs(true);
+      return;
+    }
     if (showName) onSave(showName);
     else setShowSaveAs(true);
   };
@@ -739,6 +747,14 @@ const ShowEditor = ({
           </div>
         )}
 
+        {isReadOnly && (
+          <div className="bg-yellow-900/40 border border-yellow-500/50 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center">
+            👀 Viewing {ownerLabel ? `${ownerLabel}'s` : "another user's"} show.
+            Changes won't be saved unless you click <strong>Save As</strong> to fork it under
+            your account.
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 gap-2">
           <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
@@ -773,7 +789,7 @@ const ShowEditor = ({
             >
               + Add from Library
             </button>
-            {showName ? (
+            {showName && !isReadOnly ? (
               <button
                 onClick={handleSave}
                 className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold"
@@ -785,7 +801,7 @@ const ShowEditor = ({
                 onClick={() => setShowSaveAs(true)}
                 className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold"
               >
-                💾 Save As...
+                💾 Save As…
               </button>
             )}
           </div>

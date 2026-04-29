@@ -25,6 +25,10 @@ const FireworksPlanner = () => {
 
   const [currentView, setCurrentView] = React.useState('dashboard');
   const [currentShowName, setCurrentShowName] = React.useState(null);
+  // user_id of the show currently loaded into the editor. Used so admin
+  // viewing-another-user's-show flows don't accidentally clone or stomp
+  // the show under the admin's account.
+  const [currentShowOwnerId, setCurrentShowOwnerId] = React.useState(null);
 
   const [videos, setVideos] = React.useState([]);
   const [downloadedVideos, setDownloadedVideos] = React.useState(new Map());
@@ -234,6 +238,7 @@ const FireworksPlanner = () => {
 
   const handleNewShow = () => {
     setCurrentShowName(null);
+    setCurrentShowOwnerId(null);
     setVideos([]);
     setMasterTime(0);
     setTotalDuration(60);
@@ -263,6 +268,7 @@ const FireworksPlanner = () => {
               totalDuration: found.data.totalDuration || 60,
               zoom: found.data.zoom || 1,
               videos: found.data.videos || [],
+              user_id: found.user_id,
             };
           }
         }
@@ -332,12 +338,22 @@ const FireworksPlanner = () => {
     setMasterTime(0);
     setIsPlaying(false);
     setCurrentShowName(showName);
+    setCurrentShowOwnerId(session.user_id ?? ownerUserId ?? currentUser?.id ?? null);
     setCurrentView('editor');
     setTimeout(() => showToast(`Loaded "${showName}"`, 'success'), 100);
   };
 
   const handleBackToDashboard = () => {
-    if (currentShowName && videos.length > 0) saveShow(currentShowName, true);
+    // Only auto-save when current user actually owns the show. Without this
+    // check, an admin viewing another user's show would silently clone it
+    // under their own account on every navigation back to the dashboard.
+    const isOwner =
+      currentShowOwnerId == null || currentShowOwnerId === currentUser?.id;
+    if (currentShowName && videos.length > 0 && isOwner) {
+      saveShow(currentShowName, true);
+    }
+    setCurrentShowOwnerId(null);
+    setCurrentShowName(null);
     setCurrentView('dashboard');
     setIsPlaying(false);
     loadSessionsList();
@@ -579,6 +595,12 @@ const FireworksPlanner = () => {
       prevVideosStateRef.current = null;
       return;
     }
+    // Don't auto-save when the current user doesn't own the show. Admin
+    // viewing another user's show is read-only at the persistence layer;
+    // they can still scrub / preview / fork via Save As.
+    const isOwner =
+      currentShowOwnerId == null || currentShowOwnerId === currentUser?.id;
+    if (!isOwner) return;
     const hasAnyVideosLoaded = videos.some((v) => v.duration && v.duration > 0);
     if (!hasAnyVideosLoaded) return;
 
@@ -606,7 +628,16 @@ const FireworksPlanner = () => {
 
     const timeoutId = setTimeout(() => saveShow(currentShowName, true), 15000);
     return () => clearTimeout(timeoutId);
-  }, [currentView, currentShowName, videos, totalDuration, zoom, saveShow]);
+  }, [
+    currentView,
+    currentShowName,
+    currentShowOwnerId,
+    currentUser,
+    videos,
+    totalDuration,
+    zoom,
+    saveShow,
+  ]);
 
   // Playback loop
   React.useEffect(() => {
@@ -783,6 +814,16 @@ const FireworksPlanner = () => {
           onAddFromLibrary={handleAddFromLibrary}
           onDownloadComplete={handleDownloadComplete}
           showToast={showToast}
+          isReadOnly={
+            currentShowOwnerId != null && currentShowOwnerId !== currentUser?.id
+          }
+          ownerLabel={
+            currentShowOwnerId != null && currentShowOwnerId !== currentUser?.id
+              ? savedSessions.find(
+                  (s) => s.user_id === currentShowOwnerId && s.name === currentShowName,
+                )?.creator_username || 'another user'
+              : null
+          }
         />
       )}
 
