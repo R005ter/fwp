@@ -12,7 +12,7 @@ Download the binary for your OS from the **🖥️ Desktop App** panel on the da
 |---|---|---|
 | Windows | `fwp-desktop-windows.exe` | Double-click. SmartScreen may complain — click *More info → Run anyway*. |
 | macOS | `fwp-desktop-mac.zip` | Unzip. Right-click `fwp-desktop.app` → **Open** (Gatekeeper bypass for unsigned apps). After the first open, you can launch normally. |
-| Linux | `fwp-desktop-linux` | `chmod +x fwp-desktop-linux && ./fwp-desktop-linux` |
+| Linux | `fwp-desktop-linux.AppImage` | Right-click → **Properties → Permissions → Allow executing**, then double-click. (Or `chmod +x fwp-desktop-linux.AppImage && ./fwp-desktop-linux.AppImage` from a terminal.) |
 
 ffmpeg is bundled inside the binary — you don't need to install anything else.
 
@@ -28,12 +28,20 @@ That clears the quarantine flag so the app opens like any other.
 
 ### Linux Mint specifics
 
-PyWebView uses your system's WebKit GTK. Modern Mint editions ship with it preinstalled. If launching the binary errors with `cannot import name WebKit2 from gi.repository`, install:
+The Linux build is shipped as an AppImage (`.AppImage` extension) so the file manager recognizes it and lets you run it directly via right-click → Properties → Permissions → "Allow executing file as program," then double-click.
+
+PyWebView uses your system's WebKit GTK. Modern Mint editions ship with it preinstalled. If launching the AppImage errors with `cannot import name WebKit2 from gi.repository`, install:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-0
 # Older Mint releases (20.x and earlier):
 # sudo apt install libwebkit2gtk-4.0
+```
+
+If the AppImage refuses to run with a FUSE-related error on a very minimal install, install FUSE 2:
+
+```bash
+sudo apt install libfuse2
 ```
 
 ## Run from source (developers)

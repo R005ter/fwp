@@ -2004,9 +2004,9 @@ def desktop_releases():
             {
                 "os": "linux",
                 "label": "Linux",
-                "filename": "fwp-desktop-linux",
-                "url": f"{base}/fwp-desktop-linux",
-                "note": "chmod +x fwp-desktop-linux && ./fwp-desktop-linux",
+                "filename": "fwp-desktop-linux.AppImage",
+                "url": f"{base}/fwp-desktop-linux.AppImage",
+                "note": "Right-click → Properties → Permissions → Allow executing, then double-click.",
             },
         ],
         "source_url": f"https://github.com/{repo}",
