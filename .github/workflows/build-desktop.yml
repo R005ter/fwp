@@ -21,8 +21,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: fwp-desktop-linux.AppImage
-            build_output: desktop/dist/fwp-desktop-linux.AppImage
+            artifact_name: fwp-desktop-linux.deb
+            # Set in the Build .deb step
+            build_output: ''
           - os: windows-latest
             artifact_name: fwp-desktop-windows.exe
             build_output: desktop/dist/fwp-desktop.exe
@@ -37,24 +38,35 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Linux PyWebView depends on system WebKit GTK; librsvg2-bin gives us
-      # rsvg-convert for the AppImage icon; FUSE is required by appimagetool.
-      - name: Install Linux GUI deps
+      # ---- Linux: build a Debian package (no PyInstaller) ----------------
+      # The .deb installs the source app and declares system deps so apt
+      # resolves PyGObject / WebKit / ffmpeg natively. PyWebView's GTK
+      # backend then loads cleanly using the system's installed bindings.
+      - name: Install .deb build deps
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgirepository1.0-dev \
-            libcairo2-dev \
-            pkg-config \
-            python3-dev \
-            gir1.2-webkit2-4.1 \
-            libwebkit2gtk-4.1-0 \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-bin \
-            libfuse2t64 || sudo apt-get install -y libfuse2
+          sudo apt-get install -y dpkg-dev librsvg2-bin
 
-      - name: Install Python deps
+      - name: Build .deb
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: desktop
+        shell: bash
+        run: |
+          # Strip leading 'v' from the tag for the deb version, default to 0.0.0.
+          REF="${GITHUB_REF##*/}"
+          VERSION="${REF#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$REF" ]; then VERSION="0.0.0"; fi
+          ./build-deb.sh "$VERSION"
+          # Rename the produced file to the stable artifact name expected
+          # by the matrix.
+          built=$(ls dist/fwp-desktop_*_all.deb)
+          mv "$built" dist/fwp-desktop-linux.deb
+          ls -la dist
+
+      # ---- Mac / Windows: PyInstaller path -------------------------------
+      - name: Install Python deps (Mac/Windows)
+        if: matrix.os != 'ubuntu-latest'
         working-directory: desktop
         shell: bash
         run: |
@@ -62,58 +74,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
 
-      - name: Build binary
+      - name: Build PyInstaller binary (Mac/Windows)
+        if: matrix.os != 'ubuntu-latest'
         working-directory: desktop
         run: python build.py
 
-      - name: Wrap Linux binary in AppImage
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN=desktop/dist/fwp-desktop
-          test -e "$BIN" || { echo "PyInstaller output missing: $BIN" >&2; ls -la desktop/dist; exit 1; }
-
-          # Build the AppDir layout AppImage expects.
-          AD=desktop/AppDir
-          rm -rf "$AD"
-          mkdir -p "$AD/usr/bin"
-          cp "$BIN" "$AD/usr/bin/fwp-desktop"
-          chmod +x "$AD/usr/bin/fwp-desktop"
-
-          # AppRun is the AppImage's entrypoint — runs the bundled binary.
-          cat > "$AD/AppRun" <<'EOF'
-          #!/bin/sh
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          exec "$HERE/usr/bin/fwp-desktop" "$@"
-          EOF
-          chmod +x "$AD/AppRun"
-
-          # Desktop entry — required for AppImage to integrate with launchers.
-          cat > "$AD/fwp-desktop.desktop" <<'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=Fireworks Planner — Add Video
-          Exec=fwp-desktop
-          Icon=fwp-desktop
-          Categories=AudioVideo;Utility;
-          Terminal=false
-          EOF
-
-          # Icon: convert the project's SVG favicon to a 256x256 PNG.
-          rsvg-convert -w 256 -h 256 frontend/public/favicon.svg \
-            > "$AD/fwp-desktop.png"
-
-          # Pull appimagetool, build the AppImage.
-          curl -fsSL -o /tmp/appimagetool \
-            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x /tmp/appimagetool
-          ARCH=x86_64 /tmp/appimagetool --no-appstream "$AD" \
-            desktop/dist/fwp-desktop-linux.AppImage
-          chmod +x desktop/dist/fwp-desktop-linux.AppImage
-          ls -la desktop/dist
-
-      - name: Stage artifact
+      # ---- Common: stage + upload ----------------------------------------
+      - name: Stage artifact (Mac/Windows)
+        if: matrix.os != 'ubuntu-latest'
         shell: bash
         run: |
           set -e

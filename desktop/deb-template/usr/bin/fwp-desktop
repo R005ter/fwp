@@ -1,0 +1,3 @@
+#!/bin/bash
+# Entry-point shim. Run the venv's Python on the installed source.
+exec /opt/fwp-desktop/venv/bin/python /opt/fwp-desktop/fwp_mini.py "$@"

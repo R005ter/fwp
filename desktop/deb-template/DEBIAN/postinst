@@ -1,0 +1,35 @@
+#!/bin/bash
+# Create a venv that inherits system PyGObject + WebKit2GTK from apt, and
+# pip-install the small set of pure-Python deps from PyPI. We use --no-deps
+# on pywebview because its install_requires contains per-OS GUI backend
+# packages (PyGObject on Linux is provided by apt; we don't want pip
+# duplicating it).
+set -e
+
+APP_DIR=/opt/fwp-desktop
+VENV="$APP_DIR/venv"
+
+case "$1" in
+  configure)
+    rm -rf "$VENV"
+    python3 -m venv --system-site-packages "$VENV"
+    PIP="$VENV/bin/pip"
+    "$PIP" install --quiet --upgrade pip
+    "$PIP" install --quiet --no-deps "pywebview>=5.0"
+    "$PIP" install --quiet \
+        bottle proxy_tools typing_extensions \
+        "yt-dlp>=2025.1" "requests>=2.31"
+
+    # Refresh icon + desktop database so the menu entry appears immediately.
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database -q || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+      gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+    fi
+    ;;
+  abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+esac
+
+exit 0

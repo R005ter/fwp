@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fireworks Planner — Add Video
+GenericName=Fireworks Show Library Uploader
+Comment=Download a YouTube video and upload it to your Fireworks Planner library
+Exec=fwp-desktop
+Icon=fwp-desktop
+Terminal=false
+Categories=AudioVideo;Video;Utility;
+Keywords=fireworks;youtube;video;download;
+StartupNotify=true

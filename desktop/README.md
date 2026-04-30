@@ -12,7 +12,7 @@ Download the binary for your OS from the **🖥️ Desktop App** panel on the da
 |---|---|---|
 | Windows | `fwp-desktop-windows.exe` | Double-click. SmartScreen may complain — click *More info → Run anyway*. |
 | macOS | `fwp-desktop-mac.zip` | Unzip. Right-click `fwp-desktop.app` → **Open** (Gatekeeper bypass for unsigned apps). After the first open, you can launch normally. |
-| Linux | `fwp-desktop-linux.AppImage` | Right-click → **Properties → Permissions → Allow executing**, then double-click. (Or `chmod +x fwp-desktop-linux.AppImage && ./fwp-desktop-linux.AppImage` from a terminal.) |
+| Linux (Mint / Ubuntu / Debian) | `fwp-desktop-linux.deb` | Double-click the `.deb` → Software Installer opens → enter password → installed. The app then appears in your menu under *Multimedia* (or *Sound & Video*). System-installs `python3-gi`, `libwebkit2gtk-4.1-0`, `ffmpeg` automatically. |
 
 ffmpeg is bundled inside the binary — you don't need to install anything else.
 
@@ -28,21 +28,21 @@ That clears the quarantine flag so the app opens like any other.
 
 ### Linux Mint specifics
 
-The Linux build is shipped as an AppImage (`.AppImage` extension) so the file manager recognizes it and lets you run it directly via right-click → Properties → Permissions → "Allow executing file as program," then double-click.
+The Linux build ships as a `.deb` package because that's what Mint's Software Installer (and `apt`) speak natively. The package declares its system dependencies — `python3-gi`, `gir1.2-webkit2-4.1`, `libwebkit2gtk-4.1-0`, `ffmpeg` — so apt installs them for you. PyWebView's GTK backend then loads cleanly using the bindings on disk.
 
-PyWebView uses your system's WebKit GTK. Modern Mint editions ship with it preinstalled. If launching the AppImage errors with `cannot import name WebKit2 from gi.repository`, install:
-
-```bash
-sudo apt install libwebkit2gtk-4.1-0
-# Older Mint releases (20.x and earlier):
-# sudo apt install libwebkit2gtk-4.0
-```
-
-If the AppImage refuses to run with a FUSE-related error on a very minimal install, install FUSE 2:
+Install via terminal if double-click misbehaves:
 
 ```bash
-sudo apt install libfuse2
+sudo apt install ~/Downloads/fwp-desktop-linux.deb
 ```
+
+Uninstall:
+
+```bash
+sudo apt remove fwp-desktop
+```
+
+The pure-Python deps (`pywebview`, `yt-dlp`, `requests` and a couple small transitives) live in a per-install venv at `/opt/fwp-desktop/venv/`, pip-installed by the package's `postinst` script from PyPI. The venv inherits system site-packages (`--system-site-packages`) so the apt-installed `python3-gi` is visible to pywebview's GTK backend.
 
 ## Run from source (developers)
 
