@@ -479,17 +479,18 @@ const FireworksPlanner = () => {
     showToast('Video settings saved', 'success');
   };
 
-  const handleAddToLibrary = async (filename, title) => {
+  const handleAddToLibrary = async (filename, title, defaults = {}) => {
     if (!authenticated || !filename) return { ok: false, error: 'not authenticated' };
     try {
       // /api/library POST with metadata for this filename — server's
       // save_library_metadata looks up the video by filename and creates
       // the per-user library row (or updates if already there).
+      const metadata = { title: title || filename, ...defaults };
       const res = await fetch(`${API_BASE}/api/library`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ filename, metadata: { title: title || filename } }),
+        body: JSON.stringify({ filename, metadata }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -501,6 +502,51 @@ const FireworksPlanner = () => {
       return { ok: true };
     } catch (err) {
       showToast(`Couldn't add to library: ${err.message}`, 'error');
+      return { ok: false, error: err.message };
+    }
+  };
+
+  // Push the current show-instance trim/crop back to the library entry as
+  // the new defaults. Existing library metadata (title, sourceUrl, duration)
+  // is preserved — server-side save_library_metadata replaces the whole
+  // metadata blob, so the merge has to happen on the client.
+  const handleSaveSettingsToLibrary = async (filename, settings) => {
+    if (!authenticated || !filename) return { ok: false, error: 'not authenticated' };
+    const existing = downloadedVideos.get(filename);
+    if (!existing) {
+      // Caller should have used handleAddToLibrary instead.
+      showToast('Video isn\'t in your library yet', 'warning');
+      return { ok: false, error: 'not in library' };
+    }
+    try {
+      const metadata = {
+        title: existing.title,
+        sourceUrl: existing.sourceUrl,
+        duration: existing.duration,
+        defaultTrimStart: existing.defaultTrimStart || 0,
+        defaultTrimEnd: existing.defaultTrimEnd || 0,
+        defaultCropX: existing.defaultCropX || 0,
+        defaultCropY: existing.defaultCropY || 0,
+        defaultCropWidth: existing.defaultCropWidth || 100,
+        defaultCropHeight: existing.defaultCropHeight || 100,
+        ...settings, // override with the show's current values
+      };
+      const res = await fetch(`${API_BASE}/api/library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ filename, metadata }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Couldn't save: ${err.error || res.status}`, 'error');
+        return { ok: false, error: err.error || `HTTP ${res.status}` };
+      }
+      await loadAvailableVideos();
+      showToast(`Saved trim/crop to "${existing.title}"`, 'success');
+      return { ok: true };
+    } catch (err) {
+      showToast(`Couldn't save settings: ${err.message}`, 'error');
       return { ok: false, error: err.message };
     }
   };
@@ -839,6 +885,7 @@ const FireworksPlanner = () => {
           onBack={handleBackToDashboard}
           onAddFromLibrary={handleAddFromLibrary}
           onAddToLibrary={handleAddToLibrary}
+          onSaveSettingsToLibrary={handleSaveSettingsToLibrary}
           onDownloadComplete={handleDownloadComplete}
           showToast={showToast}
           isReadOnly={

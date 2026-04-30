@@ -4,6 +4,39 @@ import { API_BASE, extractVideoId } from '../api.js';
 // Match what App.jsx uses, but provide a safe fallback if absent.
 const noopToast = (msg) => alert(msg);
 
+// True if the show-instance trim/crop values differ from any non-default
+// (i.e. anything other than 0/0/100/100 trim and full-frame crop).
+const hasNonDefaultTrimCrop = (v) =>
+  (v.trimStart || 0) > 0 ||
+  (v.trimEnd || 0) > 0 ||
+  (v.cropX || 0) !== 0 ||
+  (v.cropY || 0) !== 0 ||
+  (v.cropWidth ?? 100) !== 100 ||
+  (v.cropHeight ?? 100) !== 100;
+
+// True if the show-instance values differ from the library defaults stored
+// alongside the entry in downloadedVideos.
+const trimCropDiffersFromLibrary = (v, libVideo) => {
+  if (!libVideo) return false;
+  return (
+    (v.trimStart || 0) !== (libVideo.defaultTrimStart || 0) ||
+    (v.trimEnd || 0) !== (libVideo.defaultTrimEnd || 0) ||
+    (v.cropX || 0) !== (libVideo.defaultCropX || 0) ||
+    (v.cropY || 0) !== (libVideo.defaultCropY || 0) ||
+    (v.cropWidth ?? 100) !== (libVideo.defaultCropWidth ?? 100) ||
+    (v.cropHeight ?? 100) !== (libVideo.defaultCropHeight ?? 100)
+  );
+};
+
+const trimCropAsLibraryDefaults = (v) => ({
+  defaultTrimStart: v.trimStart || 0,
+  defaultTrimEnd: v.trimEnd || 0,
+  defaultCropX: v.cropX || 0,
+  defaultCropY: v.cropY || 0,
+  defaultCropWidth: v.cropWidth ?? 100,
+  defaultCropHeight: v.cropHeight ?? 100,
+});
+
 const ShowEditor = ({
   showName,
   videos,
@@ -31,6 +64,7 @@ const ShowEditor = ({
   onBack,
   onAddFromLibrary,
   onAddToLibrary,
+  onSaveSettingsToLibrary,
   onDownloadComplete,
   showToast = noopToast,
   isReadOnly = false,
@@ -534,6 +568,9 @@ const ShowEditor = ({
     const shouldShow = videoTime >= 0 && videoTime <= trimmedDuration;
     const isInLibrary =
       !!video.filename && downloadedVideos && downloadedVideos.has(video.filename);
+    const libVideo = isInLibrary ? downloadedVideos.get(video.filename) : null;
+    const settingsDifferFromLibrary =
+      isInLibrary && trimCropDiffersFromLibrary(video, libVideo);
 
     const cellStyle = {
       borderColor: isActive ? video.color : '#374151',
@@ -609,8 +646,8 @@ const ShowEditor = ({
         </button>
 
         {/* "Add to Library" chip — only shown when this filename isn't yet
-            in the current user's library. Clicking POSTs /api/library and
-            refreshes downloadedVideos. */}
+            in the current user's library. Optionally captures the show's
+            current trim/crop as the library defaults. */}
         {!isInLibrary && video.filename && onAddToLibrary && (
           <button
             onClick={async (e) => {
@@ -620,12 +657,48 @@ const ShowEditor = ({
                 video.name || video.filename,
               );
               if (proposed === null) return; // cancelled
-              await onAddToLibrary(video.filename, proposed.trim() || video.filename);
+              const title = proposed.trim() || video.filename;
+
+              let defaults = {};
+              if (hasNonDefaultTrimCrop(video)) {
+                const useSettings = window.confirm(
+                  `Save the current trim & crop as the library defaults for "${title}"?\n\n` +
+                    'OK: future shows that add this video will start with these settings.\n' +
+                    'Cancel: library starts with no trim/crop; you can save them later.',
+                );
+                if (useSettings) defaults = trimCropAsLibraryDefaults(video);
+              }
+              await onAddToLibrary(video.filename, title, defaults);
             }}
             className="absolute top-2 right-10 bg-yellow-600/80 hover:bg-yellow-500 text-yellow-50 px-2 py-1 rounded text-xs font-medium border border-yellow-400/50"
             title={`Add ${video.filename} to your library`}
           >
             + Library
+          </button>
+        )}
+
+        {/* "Save settings to Library" chip — only shown when video IS in
+            the library AND the instance's trim/crop differs from library
+            defaults. Clicking pushes the show's settings back as new defaults. */}
+        {settingsDifferFromLibrary && onSaveSettingsToLibrary && !isReadOnly && (
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              const ok = window.confirm(
+                `Save this show's trim & crop as the library defaults for "${libVideo.title}"?\n\n` +
+                  'Future shows that add this video will start with these settings.\n' +
+                  'Existing shows are not affected.',
+              );
+              if (!ok) return;
+              await onSaveSettingsToLibrary(
+                video.filename,
+                trimCropAsLibraryDefaults(video),
+              );
+            }}
+            className="absolute top-2 right-10 bg-blue-600/80 hover:bg-blue-500 text-blue-50 px-2 py-1 rounded text-xs font-medium border border-blue-400/50"
+            title="Push these trim/crop settings back to the library"
+          >
+            💾 → Lib
           </button>
         )}
 
