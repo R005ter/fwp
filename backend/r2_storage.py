@@ -36,26 +36,42 @@ else:
     print("⚠ R2 storage not configured (missing environment variables)")
 
 
-def upload_to_r2(local_file_path: Path, object_key: str) -> bool:
-    """Upload a file to R2 bucket"""
+_CONTENT_TYPE_BY_EXT = {
+    # video
+    '.mp4': 'video/mp4',
+    '.m4a': 'audio/mp4',
+    '.webm': 'video/webm',
+    '.mkv': 'video/x-matroska',
+    '.mov': 'video/quicktime',
+    # photos
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+}
+
+
+def upload_to_r2(local_file_path: Path, object_key: str, content_type: Optional[str] = None) -> bool:
+    """Upload a file to R2 bucket. Content-type derived from the object key
+    extension when not passed explicitly."""
     if not R2_ENABLED or not s3_client:
         return False
-    
+
     try:
-        # Determine content type based on file extension
-        content_type = 'video/mp4'
-        if object_key.endswith('.m4a'):
-            content_type = 'audio/mp4'
-        elif object_key.endswith('.webm'):
-            content_type = 'video/webm'
-        
+        if content_type is None:
+            ext = ''
+            if '.' in object_key:
+                ext = '.' + object_key.rsplit('.', 1)[-1].lower()
+            content_type = _CONTENT_TYPE_BY_EXT.get(ext, 'application/octet-stream')
+
         s3_client.upload_file(
             str(local_file_path),
             R2_BUCKET_NAME,
             object_key,
             ExtraArgs={'ContentType': content_type}
         )
-        print(f"✓ Uploaded {object_key} to R2")
+        print(f"✓ Uploaded {object_key} to R2 ({content_type})")
         return True
     except Exception as e:
         print(f"✗ Failed to upload {object_key} to R2: {str(e)}")

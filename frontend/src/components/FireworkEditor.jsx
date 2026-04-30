@@ -19,6 +19,80 @@ const dollarsToCents = (s) => {
 };
 
 /**
+ * Small "Upload photo" control. Posts a single file to /api/photos and
+ * calls onUploaded(url) with the resulting public URL. The actual URL
+ * field is the source of truth (the user can also paste a URL by hand).
+ */
+const PhotoUploadControl = ({ currentUrl, onUploaded, showToast }) => {
+  const inputRef = React.useRef(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const onPick = () => inputRef.current?.click();
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast?.('Pick an image file (jpg / png / webp / gif)', 'warning');
+      return;
+    }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${API_BASE}/api/photos`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const { url } = await res.json();
+      onUploaded?.(url);
+      showToast?.('Photo uploaded', 'success');
+    } catch (err) {
+      showToast?.(`Upload failed: ${err.message}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        onChange={onFile}
+        className="hidden"
+      />
+      <button
+        type="button"
+        onClick={onPick}
+        disabled={busy}
+        className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-700 disabled:opacity-50 px-3 py-2 rounded text-sm transition"
+      >
+        {busy ? 'Uploading…' : currentUrl ? '🔁 Replace photo' : '📷 Upload photo'}
+      </button>
+      {currentUrl && (
+        <button
+          type="button"
+          onClick={() => onUploaded?.('')}
+          className="bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded text-sm transition"
+          title="Clear photo"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+};
+
+
+/**
  * Row for one firework_video inside the Videos panel.
  * Manages its own dirty state; auto-saves on blur via a small Save button
  * so a user can fiddle with values without each keystroke firing a PATCH.
@@ -445,6 +519,11 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
               onChange={(e) => setBoxPhotoUrl(e.target.value)}
               placeholder="Box photo URL (optional)"
               className="mt-2 w-full bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <PhotoUploadControl
+              currentUrl={boxPhotoUrl}
+              onUploaded={(url) => setBoxPhotoUrl(url)}
+              showToast={showToast}
             />
           </div>
 

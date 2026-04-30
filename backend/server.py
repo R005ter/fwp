@@ -1435,6 +1435,115 @@ def serve_video(filename):
     return jsonify({"error": "Video not found"}), 404
 
 
+# --------------------------------------------------------------------------
+# Photo upload + serve (used by the firework editor for box photos)
+# --------------------------------------------------------------------------
+
+_ALLOWED_PHOTO_MIMES = {
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+}
+_PHOTO_EXT_BY_MIME = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+}
+_MAX_PHOTO_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@app.route("/api/photos", methods=["POST"])
+def upload_photo():
+    """Receive a single image file, store under photos/<uuid>.<ext> in R2,
+    return a URL the client can save into firework.box_photo_url."""
+    auth_error = require_auth()
+    if auth_error:
+        return auth_error
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files['file']
+    if not f or not f.filename:
+        return jsonify({"error": "Empty file"}), 400
+
+    mime = (f.mimetype or '').lower()
+    if mime not in _ALLOWED_PHOTO_MIMES:
+        return jsonify({"error": f"Unsupported image type: {mime}"}), 415
+
+    # Stream into memory bounded by the cap so we don't accept arbitrary
+    # uploads regardless of Flask's MAX_CONTENT_LENGTH.
+    buf = f.read(_MAX_PHOTO_BYTES + 1)
+    if len(buf) > _MAX_PHOTO_BYTES:
+        return jsonify({"error": "File too large (max 10 MB)"}), 413
+
+    ext = _PHOTO_EXT_BY_MIME[mime]
+    photo_key = f"photos/{uuid.uuid4().hex}{ext}"
+
+    if not R2_ENABLED:
+        return jsonify({"error": "Photo storage not configured (R2 disabled)"}), 503
+
+    # boto3 needs a file path or bytes; write to a NamedTemporaryFile then upload.
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(buf)
+        tmp_path = tmp.name
+
+    try:
+        if not upload_to_r2(Path(tmp_path), photo_key):
+            return jsonify({"error": "R2 upload failed"}), 502
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    base_url = request.url_root.rstrip('/')
+    return jsonify({
+        "url": f"{base_url}/{photo_key}",
+        "key": photo_key,
+        "mime": mime,
+        "bytes": len(buf),
+    })
+
+
+@app.route("/photos/<filename>")
+def serve_photo(filename):
+    """Stream a photo from R2 through the backend (same pattern as
+    /videos/<filename>). Photos live under the photos/ prefix."""
+    if not filename or '/' in filename or '..' in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+
+    key = f"photos/{filename}"
+
+    if R2_ENABLED:
+        try:
+            from r2_storage import s3_client, R2_BUCKET_NAME
+            if file_exists_in_r2(key):
+                obj = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+                content_type = obj.get('ContentType') or 'application/octet-stream'
+                content_length = obj.get('ContentLength')
+
+                def generate():
+                    body = obj['Body']
+                    while True:
+                        chunk = body.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+
+                headers = {
+                    'Content-Type': content_type,
+                    'Cache-Control': 'public, max-age=86400',
+                    'Access-Control-Allow-Origin': '*',
+                }
+                if content_length:
+                    headers['Content-Length'] = str(content_length)
+                return Response(generate(), 200, headers)
+        except Exception as e:
+            print(f"[photo serve] R2 error for {key}: {e}")
+
+    return jsonify({"error": "Photo not found"}), 404
+
+
 @app.route("/")
 def serve_frontend():
     """Serve the main frontend page"""
