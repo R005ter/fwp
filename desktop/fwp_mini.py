@@ -214,8 +214,14 @@ def _parse_pct(s: str) -> float | None:
         return None
 
 
-def download_and_upload(url: str, token: str, on_progress) -> dict:
-    """yt-dlp → temp file → POST /api/upload-video. Returns {"ok": bool, ...}."""
+def download_and_upload(
+    url: str, token: str, on_progress, custom_title: str | None = None
+) -> dict:
+    """yt-dlp → temp file → POST /api/upload-video. Returns {"ok": bool, ...}.
+
+    custom_title overrides whatever yt-dlp resolved as the video's title; if
+    None or empty, the YouTube title is used.
+    """
     on_progress({"phase": "starting", "message": "Resolving video…", "percent": None})
     with tempfile.TemporaryDirectory(prefix="fwp-") as tmp_root:
         tmp = Path(tmp_root)
@@ -256,7 +262,8 @@ def download_and_upload(url: str, token: str, on_progress) -> dict:
         except Exception as e:
             return {"ok": False, "error": f"Download failed: {e}"}
 
-        title = (info or {}).get("title") or "video"
+        yt_title = (info or {}).get("title") or "video"
+        title = (custom_title or "").strip() or yt_title
         video_id = (info or {}).get("id") or ""
 
         # Find the merged file (yt-dlp may rename).
@@ -343,7 +350,7 @@ class API:
         self.user = None
         return {"ok": True}
 
-    def submit_url(self, url: str):
+    def submit_url(self, url: str, title: str = ""):
         if not self.token:
             return {"ok": False, "error": "Not signed in"}
         if not looks_like_youtube_url(url):
@@ -351,7 +358,12 @@ class API:
 
         def runner():
             try:
-                result = download_and_upload(url, self.token, lambda p: self._emit("progress", p))
+                result = download_and_upload(
+                    url,
+                    self.token,
+                    lambda p: self._emit("progress", p),
+                    custom_title=title,
+                )
                 self._emit("complete", result)
             except Exception as e:  # last-resort guard
                 self._emit("complete", {"ok": False, "error": f"Unexpected: {e}"})
@@ -405,6 +417,13 @@ HTML = r"""<!doctype html>
       <label class="block text-sm text-gray-400">YouTube URL</label>
       <input id="urlInput" type="text" placeholder="https://www.youtube.com/watch?v=…"
         class="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-orange-500" />
+
+      <label class="block text-sm text-gray-400 pt-1">
+        Library title <span class="text-gray-500">(optional — falls back to the YouTube title)</span>
+      </label>
+      <input id="titleInput" type="text" placeholder="e.g. King Cake"
+        class="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-orange-500" />
+
       <button id="downloadBtn"
         class="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-3 rounded-lg font-bold transition">
         Download &amp; Upload
@@ -471,13 +490,14 @@ HTML = r"""<!doctype html>
   $("downloadBtn").addEventListener("click", async () => {
     if (busy) return;
     const url = ($("urlInput").value || "").trim();
+    const title = ($("titleInput").value || "").trim();
     if (!url) return;
     busy = true;
     $("downloadBtn").disabled = true;
     $("status").classList.remove("hidden");
     $("statusMsg").textContent = "Submitting…";
     $("progressBar").style.width = "0%";
-    const res = await window.pywebview.api.submit_url(url);
+    const res = await window.pywebview.api.submit_url(url, title);
     if (!res.ok) {
       $("statusMsg").textContent = "❌ " + res.error;
       busy = false;
@@ -503,6 +523,7 @@ HTML = r"""<!doctype html>
         item.textContent = "✓ " + (msg.title || msg.filename || "video");
         $("history").prepend(item);
         $("urlInput").value = "";
+        $("titleInput").value = "";
       } else {
         $("statusMsg").textContent = "❌ " + (msg.error || "failed");
       }

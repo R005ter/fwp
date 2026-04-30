@@ -479,6 +479,32 @@ const FireworksPlanner = () => {
     showToast('Video settings saved', 'success');
   };
 
+  const handleAddToLibrary = async (filename, title) => {
+    if (!authenticated || !filename) return { ok: false, error: 'not authenticated' };
+    try {
+      // /api/library POST with metadata for this filename — server's
+      // save_library_metadata looks up the video by filename and creates
+      // the per-user library row (or updates if already there).
+      const res = await fetch(`${API_BASE}/api/library`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ filename, metadata: { title: title || filename } }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Couldn't add to library: ${err.error || res.status}`, 'error');
+        return { ok: false, error: err.error || `HTTP ${res.status}` };
+      }
+      await loadAvailableVideos();
+      showToast(`Added "${title || filename}" to library`, 'success');
+      return { ok: true };
+    } catch (err) {
+      showToast(`Couldn't add to library: ${err.message}`, 'error');
+      return { ok: false, error: err.message };
+    }
+  };
+
   const handleAddFromLibrary = (videoData) => {
     const initialDuration =
       videoData.duration && videoData.duration > 0 ? videoData.duration : 0;
@@ -812,6 +838,7 @@ const FireworksPlanner = () => {
           onSave={saveShow}
           onBack={handleBackToDashboard}
           onAddFromLibrary={handleAddFromLibrary}
+          onAddToLibrary={handleAddToLibrary}
           onDownloadComplete={handleDownloadComplete}
           showToast={showToast}
           isReadOnly={

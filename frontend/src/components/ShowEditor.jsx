@@ -30,6 +30,7 @@ const ShowEditor = ({
   onSave,
   onBack,
   onAddFromLibrary,
+  onAddToLibrary,
   onDownloadComplete,
   showToast = noopToast,
   isReadOnly = false,
@@ -531,6 +532,8 @@ const ShowEditor = ({
     const isActive =
       video.duration && video.duration > 0 && videoTime >= 0 && videoTime <= trimmedDuration;
     const shouldShow = videoTime >= 0 && videoTime <= trimmedDuration;
+    const isInLibrary =
+      !!video.filename && downloadedVideos && downloadedVideos.has(video.filename);
 
     const cellStyle = {
       borderColor: isActive ? video.color : '#374151',
@@ -604,6 +607,27 @@ const ShowEditor = ({
         >
           ×
         </button>
+
+        {/* "Add to Library" chip — only shown when this filename isn't yet
+            in the current user's library. Clicking POSTs /api/library and
+            refreshes downloadedVideos. */}
+        {!isInLibrary && video.filename && onAddToLibrary && (
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              const proposed = window.prompt(
+                'Title for library?',
+                video.name || video.filename,
+              );
+              if (proposed === null) return; // cancelled
+              await onAddToLibrary(video.filename, proposed.trim() || video.filename);
+            }}
+            className="absolute top-2 right-10 bg-yellow-600/80 hover:bg-yellow-500 text-yellow-50 px-2 py-1 rounded text-xs font-medium border border-yellow-400/50"
+            title={`Add ${video.filename} to your library`}
+          >
+            + Library
+          </button>
+        )}
 
         <div className="absolute bottom-2 left-2 right-2 bg-black/80 px-2 py-1 rounded space-y-1">
           <div className="flex items-center gap-2">
