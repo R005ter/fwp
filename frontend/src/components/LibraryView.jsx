@@ -1,20 +1,25 @@
 import React from 'react';
+import FireworkEditor from './FireworkEditor.jsx';
 
 /**
- * Project firework library view (post-migration 001).
+ * Project firework library.
  *
- * Stub implementation: lists every firework in the current project's
- * inventory with its primary video preview, name, and basic metadata. The
- * full firework editor (manage videos, edit metadata, set defaults, JSONB
- * extras) lands in a follow-up; this view exists so the app stays
- * navigable end-to-end after the project/firework refactor.
+ * Two modes:
+ *   - List: grid of fireworks in the current project. Click a card to open
+ *     the editor.
+ *   - Editor: <FireworkEditor> for the selected firework. Save/back returns
+ *     here and triggers a refresh from the parent.
  */
 const LibraryView = ({
   fireworks,
   currentProject,
   onBack,
+  onRefresh,
+  showToast,
 }) => {
   const [search, setSearch] = React.useState('');
+  const [editingId, setEditingId] = React.useState(null);
+
   const filtered = (fireworks || []).filter((f) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -24,6 +29,20 @@ const LibraryView = ({
       (f.primary_filename || '').toLowerCase().includes(q)
     );
   });
+
+  if (editingId != null) {
+    return (
+      <FireworkEditor
+        fireworkId={editingId}
+        showToast={showToast}
+        onBack={() => setEditingId(null)}
+        onSaved={async () => {
+          await onRefresh?.();
+          setEditingId(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 text-white p-6">
@@ -73,9 +92,10 @@ const LibraryView = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((f) => (
-              <div
+              <button
                 key={f.id}
-                className="bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30 hover:border-green-400 transition"
+                onClick={() => setEditingId(f.id)}
+                className="text-left bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30 hover:border-green-400 hover:bg-gray-800/70 transition focus:outline-none focus:ring-2 focus:ring-green-500"
               >
                 {/* Box photo or video poster */}
                 <div className="aspect-video bg-black rounded mb-3 overflow-hidden">
@@ -89,7 +109,7 @@ const LibraryView = ({
                     <video
                       src={f.primary_url}
                       preload="metadata"
-                      controls
+                      muted
                       className="w-full h-full"
                     />
                   ) : (
@@ -131,10 +151,14 @@ const LibraryView = ({
                 </div>
                 {(f.default_trim_start > 0 || f.default_trim_end > 0) && (
                   <div className="text-xs text-yellow-400 mt-2">
-                    ✂️ trim {f.default_trim_start?.toFixed(1)}s – {f.default_trim_end?.toFixed(1)}s
+                    ✂️ trim {f.default_trim_start?.toFixed(1)}s –{' '}
+                    {f.default_trim_end?.toFixed(1)}s
                   </div>
                 )}
-              </div>
+                <div className="mt-2 text-[11px] text-green-400">
+                  Click to edit →
+                </div>
+              </button>
             ))}
           </div>
         )}

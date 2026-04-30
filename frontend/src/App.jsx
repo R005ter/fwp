@@ -718,6 +718,8 @@ const FireworksPlanner = () => {
           currentProject={currentProject}
           onBack={handleBackFromLibrary}
           onDownloadComplete={handleDownloadComplete}
+          onRefresh={() => loadFireworks(currentProjectId)}
+          showToast={showToast}
         />
       )}
       {currentView === 'editor' && (
