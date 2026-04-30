@@ -73,6 +73,30 @@ def list_project_members(project_id: int) -> list[dict]:
         conn.close()
 
 
+def update_project(project_id: int, patch: dict) -> bool:
+    """Apply a small allowlist of fields. Plan changes are intentionally not
+    here — that'll come with the billing layer."""
+    cols = {"name"}
+    sets, params = [], []
+    for c in cols:
+        if c in patch:
+            sets.append(f"{c} = %s")
+            params.append(patch[c])
+    if not sets:
+        return False
+    sets.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(project_id)
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        execute_sql(cur, f"UPDATE projects SET {', '.join(sets)} WHERE id = %s",
+                    tuple(params))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def create_project(name: str, owner_user_id: int, plan: str = "free") -> dict:
     conn = get_db()
     cur = conn.cursor()

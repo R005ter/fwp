@@ -83,6 +83,22 @@ def create_project():
     return jsonify(pdb.create_project(name, uid)), 201
 
 
+@bp.route("/api/projects/<int:project_id>", methods=["PATCH"])
+def patch_project(project_id):
+    uid, role, err = _require_member(project_id, min_role="owner")
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    patch = {}
+    if name:
+        patch["name"] = name
+    if not patch:
+        return jsonify({"error": "no fields to update"}), 400
+    ok = pdb.update_project(project_id, patch)
+    return jsonify({"ok": ok})
+
+
 @bp.route("/api/projects/<int:project_id>", methods=["GET"])
 def get_project_detail(project_id):
     uid, role, err = _require_member(project_id)

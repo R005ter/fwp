@@ -710,6 +710,7 @@ const FireworksPlanner = () => {
           projects={projects}
           onSwitchProject={handleProjectSwitch}
           onLogout={handleLogout}
+          showToast={showToast}
         />
       )}
       {currentView === 'library' && (

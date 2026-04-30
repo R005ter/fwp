@@ -1,6 +1,7 @@
 import React from 'react';
 import { API_BASE, extractVideoId } from '../api.js';
 import AdminDesktopDownload from './AdminDesktopDownload.jsx';
+import ProjectSettings from './ProjectSettings.jsx';
 
 const Dashboard = ({
   onEditShow,
@@ -15,7 +16,10 @@ const Dashboard = ({
   projects,
   onSwitchProject,
   onLogout,
+  showToast,
 }) => {
+  const [showSettings, setShowSettings] = React.useState(false);
+
   // Backward-compat shim: the Dashboard has lots of references like
   // `downloadedVideos.size` from the legacy code. We expose a tiny shim so
   // the existing JSX continues to read sensible values.
@@ -164,7 +168,7 @@ const Dashboard = ({
                 ? `Welcome, ${currentUser.username}!`
                 : 'Plan your perfect fireworks show'}
             </p>
-            {/* Project switcher */}
+            {/* Project switcher + settings */}
             {projects && projects.length > 0 && (
               <div className="mt-3 flex items-center gap-2">
                 <label className="text-xs text-gray-400">Project:</label>
@@ -179,6 +183,42 @@ const Dashboard = ({
                     </option>
                   ))}
                 </select>
+                {currentProject && (
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="text-gray-400 hover:text-white p-1 rounded transition"
+                    title="Project settings"
+                    aria-label="Project settings"
+                  >
+                    ⚙️
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    const projName = window.prompt(
+                      'New project name (e.g. "2027 - 4th of July"):',
+                    );
+                    if (!projName?.trim()) return;
+                    const res = await fetch(`${API_BASE}/api/projects`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ name: projName.trim() }),
+                    });
+                    if (res.ok) {
+                      const proj = await res.json();
+                      onSwitchProject?.(proj.id);
+                      // The parent's checkAuth-driven refresh handles the
+                      // projects[] update on the next mount; here we trigger
+                      // a synthetic switch so the user lands in the new one.
+                      window.location.reload();
+                    }
+                  }}
+                  className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded transition"
+                  title="Create a new project"
+                >
+                  + new
+                </button>
               </div>
             )}
           </div>
@@ -431,6 +471,20 @@ const Dashboard = ({
           </div>
         </div>
       </div>
+
+      {showSettings && currentProject && (
+        <ProjectSettings
+          projectId={currentProject.id}
+          currentUserId={currentUser?.id}
+          onClose={() => setShowSettings(false)}
+          onProjectChanged={() => {
+            // After rename: trigger a global refresh so the dashboard
+            // header / dropdown pick up the new name.
+            window.location.reload();
+          }}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 };
