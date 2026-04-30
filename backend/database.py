@@ -268,25 +268,34 @@ def init_db():
             traceback.print_exc()
             raise
         
-        # Library metadata table (user's video library settings - references shared videos)
-        try:
-            execute_sql(cursor, f'''
-                CREATE TABLE IF NOT EXISTS library (
-                    id {pk_syntax},
-                    user_id {int_type} NOT NULL,
-                    video_id {int_type} NOT NULL,
-                    metadata {text_type} NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users (id),
-                    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
-                    UNIQUE(user_id, video_id)
-                )
-            ''')
-            print("✓ Created/verified library table")
-        except Exception as e:
-            print(f"✗ Error creating library table: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            raise
+        # Library metadata table — only created when migration 001 has not
+        # archived it yet. After migration runs, library_v1_archive holds the
+        # historical data and we don't want a stale empty `library` to coexist.
+        execute_sql(cursor, """
+            SELECT to_regclass('public.library_v1_archive') IS NOT NULL AS archived
+        """)
+        archived_row = fetch_one(cursor)
+        if archived_row and archived_row['archived']:
+            print("✓ library archived as library_v1_archive (migration 001 applied)")
+        else:
+            try:
+                execute_sql(cursor, f'''
+                    CREATE TABLE IF NOT EXISTS library (
+                        id {pk_syntax},
+                        user_id {int_type} NOT NULL,
+                        video_id {int_type} NOT NULL,
+                        metadata {text_type} NOT NULL,
+                        FOREIGN KEY (user_id) REFERENCES users (id),
+                        FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+                        UNIQUE(user_id, video_id)
+                    )
+                ''')
+                print("✓ Created/verified library table")
+            except Exception as e:
+                print(f"✗ Error creating library table: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                raise
 
         # Auth tokens table — for desktop / local-client X-Auth-Token sessions.
         # Lives in the DB rather than process memory so multi-worker gunicorn

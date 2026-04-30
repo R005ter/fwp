@@ -14,17 +14,18 @@ const hasNonDefaultTrimCrop = (v) =>
   (v.cropWidth ?? 100) !== 100 ||
   (v.cropHeight ?? 100) !== 100;
 
-// True if the show-instance values differ from the library defaults stored
-// alongside the entry in downloadedVideos.
-const trimCropDiffersFromLibrary = (v, libVideo) => {
-  if (!libVideo) return false;
+// True if the show-instance trim/crop differs from the firework's primary-
+// video defaults (firework_videos.default_*). The firework rows arrive
+// keyed by id from /api/projects/:id/fireworks.
+const trimCropDiffersFromFirework = (v, firework) => {
+  if (!firework) return false;
   return (
-    (v.trimStart || 0) !== (libVideo.defaultTrimStart || 0) ||
-    (v.trimEnd || 0) !== (libVideo.defaultTrimEnd || 0) ||
-    (v.cropX || 0) !== (libVideo.defaultCropX || 0) ||
-    (v.cropY || 0) !== (libVideo.defaultCropY || 0) ||
-    (v.cropWidth ?? 100) !== (libVideo.defaultCropWidth ?? 100) ||
-    (v.cropHeight ?? 100) !== (libVideo.defaultCropHeight ?? 100)
+    (v.trimStart || 0) !== (firework.default_trim_start || 0) ||
+    (v.trimEnd || 0) !== (firework.default_trim_end || 0) ||
+    (v.cropX || 0) !== (firework.default_crop_x || 0) ||
+    (v.cropY || 0) !== (firework.default_crop_y || 0) ||
+    (v.cropWidth ?? 100) !== (firework.default_crop_width ?? 100) ||
+    (v.cropHeight ?? 100) !== (firework.default_crop_height ?? 100)
   );
 };
 
@@ -41,7 +42,8 @@ const ShowEditor = ({
   showName,
   videos,
   setVideos,
-  downloadedVideos,
+  fireworks,
+  fireworksById,
   isPlaying,
   setIsPlaying,
   masterTime,
@@ -63,7 +65,6 @@ const ShowEditor = ({
   onSave,
   onBack,
   onAddFromLibrary,
-  onAddToLibrary,
   onSaveSettingsToLibrary,
   onDownloadComplete,
   showToast = noopToast,
@@ -566,11 +567,10 @@ const ShowEditor = ({
     const isActive =
       video.duration && video.duration > 0 && videoTime >= 0 && videoTime <= trimmedDuration;
     const shouldShow = videoTime >= 0 && videoTime <= trimmedDuration;
-    const isInLibrary =
-      !!video.filename && downloadedVideos && downloadedVideos.has(video.filename);
-    const libVideo = isInLibrary ? downloadedVideos.get(video.filename) : null;
+    const firework =
+      video.firework_id && fireworksById ? fireworksById.get(video.firework_id) : null;
     const settingsDifferFromLibrary =
-      isInLibrary && trimCropDiffersFromLibrary(video, libVideo);
+      !!firework && trimCropDiffersFromFirework(video, firework);
 
     const cellStyle = {
       borderColor: isActive ? video.color : '#374151',
@@ -645,60 +645,28 @@ const ShowEditor = ({
           ×
         </button>
 
-        {/* "Add to Library" chip — only shown when this filename isn't yet
-            in the current user's library. Optionally captures the show's
-            current trim/crop as the library defaults. */}
-        {!isInLibrary && video.filename && onAddToLibrary && (
-          <button
-            onClick={async (e) => {
-              e.stopPropagation();
-              const proposed = window.prompt(
-                'Title for library?',
-                video.name || video.filename,
-              );
-              if (proposed === null) return; // cancelled
-              const title = proposed.trim() || video.filename;
-
-              let defaults = {};
-              if (hasNonDefaultTrimCrop(video)) {
-                const useSettings = window.confirm(
-                  `Save the current trim & crop as the library defaults for "${title}"?\n\n` +
-                    'OK: future shows that add this video will start with these settings.\n' +
-                    'Cancel: library starts with no trim/crop; you can save them later.',
-                );
-                if (useSettings) defaults = trimCropAsLibraryDefaults(video);
-              }
-              await onAddToLibrary(video.filename, title, defaults);
-            }}
-            className="absolute top-2 right-10 bg-yellow-600/80 hover:bg-yellow-500 text-yellow-50 px-2 py-1 rounded text-xs font-medium border border-yellow-400/50"
-            title={`Add ${video.filename} to your library`}
-          >
-            + Library
-          </button>
-        )}
-
-        {/* "Save settings to Library" chip — only shown when video IS in
-            the library AND the instance's trim/crop differs from library
-            defaults. Clicking pushes the show's settings back as new defaults. */}
-        {settingsDifferFromLibrary && onSaveSettingsToLibrary && !isReadOnly && (
+        {/* "Save settings to Firework" chip — when the per-instance trim/crop
+            in this show differs from the firework's primary-video defaults,
+            offer to push them back so future shows start with these values. */}
+        {settingsDifferFromLibrary && onSaveSettingsToLibrary && !isReadOnly && firework && (
           <button
             onClick={async (e) => {
               e.stopPropagation();
               const ok = window.confirm(
-                `Save this show's trim & crop as the library defaults for "${libVideo.title}"?\n\n` +
-                  'Future shows that add this video will start with these settings.\n' +
+                `Save this show's trim & crop as the default for "${firework.name}"?\n\n` +
+                  'Future shows that add this firework will start with these settings.\n' +
                   'Existing shows are not affected.',
               );
               if (!ok) return;
               await onSaveSettingsToLibrary(
-                video.filename,
+                firework.id,
                 trimCropAsLibraryDefaults(video),
               );
             }}
             className="absolute top-2 right-10 bg-blue-600/80 hover:bg-blue-500 text-blue-50 px-2 py-1 rounded text-xs font-medium border border-blue-400/50"
-            title="Push these trim/crop settings back to the library"
+            title="Push these trim/crop settings back to the firework's defaults"
           >
-            💾 → Lib
+            💾 → Default
           </button>
         )}
 
@@ -1050,26 +1018,42 @@ const ShowEditor = ({
                   ✕
                 </button>
               </div>
-              {downloadedVideos.size === 0 ? (
-                <p className="text-gray-500 text-center py-8">No videos in library</p>
+              {!fireworks || fireworks.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">
+                  No fireworks in this project's library yet.
+                </p>
               ) : (
                 <div className="space-y-2">
-                  {Array.from(downloadedVideos.values()).map((video) => (
+                  {fireworks.map((fw) => (
                     <div
-                      key={video.filename}
-                      className="bg-gray-700 rounded p-3 hover:bg-gray-600 transition cursor-pointer"
+                      key={fw.id}
+                      className="bg-gray-700 rounded p-3 hover:bg-gray-600 transition cursor-pointer flex items-center gap-3"
                       onClick={() => {
-                        onAddFromLibrary(video);
+                        onAddFromLibrary(fw);
                         setShowLibraryAdd(false);
                       }}
                     >
-                      <div className="font-medium text-sm">{video.title}</div>
-                      <div className="text-xs text-gray-400">{video.filename}</div>
-                      {(video.defaultTrimStart > 0 || video.defaultTrimEnd > 0) && (
-                        <div className="text-xs text-yellow-400 mt-1">
-                          {`Default trim: ${video.defaultTrimStart.toFixed(1)}s - ${video.defaultTrimEnd.toFixed(1)}s`}
-                        </div>
+                      {fw.primary_url && (
+                        <video
+                          src={fw.primary_url}
+                          className="w-20 h-12 object-cover rounded bg-black flex-shrink-0"
+                          muted
+                          preload="metadata"
+                        />
                       )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{fw.name}</div>
+                        <div className="flex flex-wrap gap-1 text-[10px] text-gray-400 mt-0.5">
+                          {fw.manufacturer && <span>{fw.manufacturer}</span>}
+                          {fw.shot_count != null && <span>· {fw.shot_count} shots</span>}
+                          {fw.grams != null && <span>· {fw.grams}g</span>}
+                        </div>
+                        {(fw.default_trim_start > 0 || fw.default_trim_end > 0) && (
+                          <div className="text-xs text-yellow-400 mt-1">
+                            {`Default trim: ${(fw.default_trim_start || 0).toFixed(1)}s – ${(fw.default_trim_end || 0).toFixed(1)}s`}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

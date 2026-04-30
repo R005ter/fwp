@@ -18,20 +18,80 @@ const TOAST_ICON = {
   info: 'ℹ️',
 };
 
+// ---------------------------------------------------------------------------
+// Show instance hydration
+// ---------------------------------------------------------------------------
+//
+// The DB stores show.data.fireworks[] as dehydrated instances:
+//   { id, firework_id, video_id, offset, trim_start, trim_end,
+//     crop_x, crop_y, crop_width, crop_height, volume, color, label }
+//
+// ShowEditor wants to operate on the legacy "video" shape with field names
+// like trimStart/cropWidth and a real video URL. We hydrate on load and
+// dehydrate on save so ShowEditor's internals barely change.
+
+const pickFirst = (...values) => values.find((v) => v !== undefined && v !== null);
+
+function hydrateInstance(inst, fireworksById) {
+  const fw = fireworksById.get(inst.firework_id);
+  if (!fw) {
+    return null; // orphan reference — caller filters out
+  }
+  return {
+    id: inst.id || `${inst.firework_id}-${Date.now()}-${Math.random()}`,
+    firework_id: fw.id,
+    video_id: inst.video_id || null,
+    name: inst.label || fw.name,
+    filename: fw.primary_filename,
+    url: fw.primary_url,
+    offset: inst.offset || 0,
+    duration: 0, // discovered from video metadata at render time
+    volume: pickFirst(inst.volume, 1.0),
+    trimStart: pickFirst(inst.trim_start, fw.default_trim_start, 0),
+    trimEnd: pickFirst(inst.trim_end, fw.default_trim_end, 0),
+    cropX: pickFirst(inst.crop_x, fw.default_crop_x, 0),
+    cropY: pickFirst(inst.crop_y, fw.default_crop_y, 0),
+    cropWidth: pickFirst(inst.crop_width, fw.default_crop_width, 100),
+    cropHeight: pickFirst(inst.crop_height, fw.default_crop_height, 100),
+    color: inst.color,
+  };
+}
+
+function dehydrateInstance(video) {
+  return {
+    id: video.id,
+    firework_id: video.firework_id,
+    video_id: video.video_id || null,
+    offset: video.offset || 0,
+    trim_start: video.trimStart || 0,
+    trim_end: video.trimEnd || 0,
+    crop_x: video.cropX || 0,
+    crop_y: video.cropY || 0,
+    crop_width: video.cropWidth ?? 100,
+    crop_height: video.cropHeight ?? 100,
+    volume: video.volume ?? 1.0,
+    color: video.color,
+    label: video.name,
+  };
+}
+
 const FireworksPlanner = () => {
   const [authenticated, setAuthenticated] = React.useState(false);
   const [currentUser, setCurrentUser] = React.useState(null);
   const [checkingAuth, setCheckingAuth] = React.useState(true);
 
+  // Project context
+  const [projects, setProjects] = React.useState([]);
+  const [currentProjectId, setCurrentProjectId] = React.useState(null);
+
+  // Per-project library of fireworks (replaces downloadedVideos)
+  const [fireworks, setFireworks] = React.useState([]);
+
   const [currentView, setCurrentView] = React.useState('dashboard');
   const [currentShowName, setCurrentShowName] = React.useState(null);
-  // user_id of the show currently loaded into the editor. Used so admin
-  // viewing-another-user's-show flows don't accidentally clone or stomp
-  // the show under the admin's account.
   const [currentShowOwnerId, setCurrentShowOwnerId] = React.useState(null);
 
   const [videos, setVideos] = React.useState([]);
-  const [downloadedVideos, setDownloadedVideos] = React.useState(new Map());
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [masterTime, setMasterTime] = React.useState(0);
   const [totalDuration, setTotalDuration] = React.useState(60);
@@ -53,10 +113,14 @@ const FireworksPlanner = () => {
   const showToast = React.useCallback((message, type = 'info') => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3000);
   }, []);
+
+  // --- Derived maps over the firework inventory --------------------------
+  const fireworksById = React.useMemo(
+    () => new Map(fireworks.map((f) => [f.id, f])),
+    [fireworks],
+  );
 
   // ---------- Auth ----------
   const checkAuth = React.useCallback(async () => {
@@ -66,6 +130,10 @@ const FireworksPlanner = () => {
       if (data.authenticated && data.user) {
         setAuthenticated(true);
         setCurrentUser(data.user);
+        const userProjects = data.user.projects || [];
+        setProjects(userProjects);
+        if (userProjects.length > 0) setCurrentProjectId(userProjects[0].id);
+
         const hash = window.location.hash;
         if (hash.includes('#/dashboard') || hash.includes('error=')) {
           window.history.replaceState(
@@ -77,6 +145,8 @@ const FireworksPlanner = () => {
       } else {
         setAuthenticated(false);
         setCurrentUser(null);
+        setProjects([]);
+        setCurrentProjectId(null);
       }
     } catch (err) {
       console.error('Auth check failed:', err);
@@ -90,10 +160,13 @@ const FireworksPlanner = () => {
     checkAuth();
   }, [checkAuth]);
 
-  const handleLogin = (user) => {
+  const handleLogin = async (user) => {
     setAuthenticated(true);
     setCurrentUser(user);
     showToast(`Welcome, ${user.username}!`, 'success');
+    // /api/auth/login returns the basic user record; the projects list lives
+    // on /api/auth/me. Re-fetch so the UI knows what projects this user has.
+    await checkAuth();
   };
 
   const handleLogout = async () => {
@@ -107,135 +180,84 @@ const FireworksPlanner = () => {
     }
     setAuthenticated(false);
     setCurrentUser(null);
+    setProjects([]);
+    setCurrentProjectId(null);
     setSavedSessions([]);
-    setDownloadedVideos(new Map());
+    setFireworks([]);
     setVideos([]);
     setCurrentView('dashboard');
     showToast('Logged out', 'info');
   };
 
-  // ---------- Server data ----------
-  const loadSessionsList = React.useCallback(async () => {
-    if (!authenticated) {
-      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-      setSavedSessions(sessions);
+  // ---------- Server data (project-scoped) ----------
+  const loadFireworks = React.useCallback(async (projectId) => {
+    if (!projectId) {
+      setFireworks([]);
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/shows`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/fireworks`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        console.error('Failed to load project fireworks:', res.status);
+        setFireworks([]);
+        return;
+      }
+      const data = await res.json();
+      setFireworks(data);
+    } catch (err) {
+      console.error('Failed to load fireworks:', err);
+      setFireworks([]);
+    }
+  }, []);
+
+  const loadShowsList = React.useCallback(async (projectId) => {
+    if (!projectId) {
+      setSavedSessions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/shows`, {
+        credentials: 'include',
+      });
       if (!res.ok) {
         setSavedSessions([]);
         return;
       }
-      const sessions = await res.json();
+      const shows = await res.json();
       setSavedSessions(
-        sessions.map((s) => ({
+        shows.map((s) => ({
           name: s.name,
           timestamp: s.timestamp,
-          totalDuration: s.data.totalDuration || 60,
-          zoom: s.data.zoom || 1,
-          videos: s.data.videos || [],
-          user_id: s.user_id,
+          totalDuration: s.data?.totalDuration || 60,
+          zoom: s.data?.zoom || 1,
+          fireworks: s.data?.fireworks || [],
+          user_id: s.created_by_user_id,
           creator_username: s.creator_username,
-          creator_email: s.creator_email,
         })),
       );
     } catch (err) {
-      console.error('Failed to load shows from server:', err);
+      console.error('Failed to load shows:', err);
       setSavedSessions([]);
     }
-  }, [authenticated]);
-
-  const loadAvailableVideos = React.useCallback(async () => {
-    const videoMap = new Map();
-    if (!authenticated) {
-      setDownloadedVideos(videoMap);
-      return;
-    }
-    try {
-      const videosRes = await fetch(`${API_BASE}/api/videos`, { credentials: 'include' });
-      if (!videosRes.ok) {
-        setDownloadedVideos(videoMap);
-        return;
-      }
-      const serverVideos = await videosRes.json();
-
-      let serverLibrary = {};
-      try {
-        const libraryRes = await fetch(`${API_BASE}/api/library`, { credentials: 'include' });
-        if (libraryRes.ok) serverLibrary = await libraryRes.json();
-      } catch (e) {
-        console.warn('Failed to load library from server:', e);
-      }
-
-      serverVideos.forEach((video) => {
-        if (videoMap.has(video.filename)) return;
-        const savedData = serverLibrary[video.filename] || {};
-        videoMap.set(video.filename, {
-          filename: video.filename,
-          title: savedData.title || video.title || video.filename,
-          url: `${API_BASE}/videos/${video.filename}`,
-          sourceUrl: savedData.sourceUrl || null,
-          size: video.size,
-          duration: savedData.duration || video.duration || null,
-          defaultTrimStart: savedData.defaultTrimStart || 0,
-          defaultTrimEnd: savedData.defaultTrimEnd || 0,
-          defaultCropX: savedData.defaultCropX || 0,
-          defaultCropY: savedData.defaultCropY || 0,
-          defaultCropWidth: savedData.defaultCropWidth || 100,
-          defaultCropHeight: savedData.defaultCropHeight || 100,
-        });
-      });
-    } catch (err) {
-      console.warn('Failed to load videos from server:', err);
-    }
-    setDownloadedVideos(videoMap);
-  }, [authenticated]);
+  }, []);
 
   React.useEffect(() => {
-    if (!authenticated) return;
-    loadSessionsList();
-    loadAvailableVideos();
+    if (!authenticated || !currentProjectId) return;
+    loadFireworks(currentProjectId);
+    loadShowsList(currentProjectId);
     const savedGridHeight = localStorage.getItem('fwp_gridHeight');
     if (savedGridHeight) setGridHeight(parseInt(savedGridHeight, 10));
-  }, [authenticated, loadSessionsList, loadAvailableVideos]);
+  }, [authenticated, currentProjectId, loadFireworks, loadShowsList]);
 
   React.useEffect(() => {
-    if (authenticated && currentView === 'dashboard') loadAvailableVideos();
-  }, [currentView, authenticated, loadAvailableVideos]);
-
-  // ---------- Library mutations ----------
-  const saveLibraryMetadata = async (videosMap) => {
-    const libraryData = {};
-    videosMap.forEach((video, filename) => {
-      libraryData[filename] = {
-        title: video.title,
-        sourceUrl: video.sourceUrl,
-        duration: video.duration,
-        defaultTrimStart: video.defaultTrimStart || 0,
-        defaultTrimEnd: video.defaultTrimEnd || 0,
-        defaultCropX: video.defaultCropX || 0,
-        defaultCropY: video.defaultCropY || 0,
-        defaultCropWidth: video.defaultCropWidth || 100,
-        defaultCropHeight: video.defaultCropHeight || 100,
-      };
-    });
-    localStorage.setItem('fwp_library', JSON.stringify(libraryData));
-    if (!authenticated) return;
-    try {
-      for (const [filename, metadata] of Object.entries(libraryData)) {
-        await fetch(`${API_BASE}/api/library`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ filename, metadata }),
-        });
-      }
-    } catch (err) {
-      console.warn('Failed to sync library to server:', err);
+    if (authenticated && currentView === 'dashboard' && currentProjectId) {
+      loadFireworks(currentProjectId);
     }
-  };
+  }, [currentView, authenticated, currentProjectId, loadFireworks]);
 
+  // ---------- Show navigation ----------
   const handleNewShow = () => {
     setCurrentShowName(null);
     setCurrentShowOwnerId(null);
@@ -248,89 +270,49 @@ const FireworksPlanner = () => {
   };
 
   const handleEditShow = async (showName, ownerUserId = null) => {
+    if (!currentProjectId) return;
     let session = null;
-    if (authenticated) {
-      try {
-        const res = await fetch(`${API_BASE}/api/shows`, { credentials: 'include' });
-        if (res.ok) {
-          const shows = await res.json();
-          // Disambiguate by user_id when the caller knows it (admins viewing
-          // someone else's show); otherwise fall back to name match.
-          const found = shows.find((s) =>
-            ownerUserId != null
-              ? s.name === showName && s.user_id === ownerUserId
-              : s.name === showName,
-          );
-          if (found) {
-            session = {
-              name: found.name,
-              timestamp: found.timestamp,
-              totalDuration: found.data.totalDuration || 60,
-              zoom: found.data.zoom || 1,
-              videos: found.data.videos || [],
-              user_id: found.user_id,
-            };
-          }
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${currentProjectId}/shows`, {
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const shows = await res.json();
+        const found = shows.find((s) =>
+          ownerUserId != null
+            ? s.name === showName && s.created_by_user_id === ownerUserId
+            : s.name === showName,
+        );
+        if (found) {
+          session = {
+            name: found.name,
+            timestamp: found.timestamp,
+            totalDuration: found.data?.totalDuration || 60,
+            zoom: found.data?.zoom || 1,
+            fireworks: found.data?.fireworks || [],
+            user_id: found.created_by_user_id,
+          };
         }
-      } catch (err) {
-        console.warn('Failed to load show from server:', err);
       }
+    } catch (err) {
+      console.warn('Failed to load show from server:', err);
     }
+
     if (!session) {
-      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-      session = sessions.find((s) => s.name === showName);
-    }
-    if (!session) {
-      showToast('Session not found', 'error');
+      showToast('Show not found', 'error');
       return;
     }
 
+    // Clean up existing video refs
     videos.forEach((v) => {
       if (v.url && v.url.startsWith('blob:')) URL.revokeObjectURL(v.url);
     });
     Object.keys(videoRefs.current).forEach((key) => delete videoRefs.current[key]);
 
-    const restoredVideos = session.videos
-      .filter((v) => v.filename)
-      .map((v) => {
-        const libraryVideo = downloadedVideos.get(v.filename);
-        let videoUrl = null;
-        if (libraryVideo && libraryVideo.url) {
-          videoUrl = libraryVideo.url.startsWith('blob:')
-            ? libraryVideo.url
-            : `${API_BASE}/videos/${v.filename}`;
-        } else if (v.filename) {
-          videoUrl = `${API_BASE}/videos/${v.filename}`;
-        }
-
-        let duration = 0;
-        if (v.duration && v.duration > 0) {
-          duration = v.duration;
-        } else if (libraryVideo && libraryVideo.duration && libraryVideo.duration > 0) {
-          duration = libraryVideo.duration;
-        } else {
-          try {
-            const cache = JSON.parse(
-              localStorage.getItem('fwp_video_metadata_cache') || '{}',
-            );
-            const cached = cache[v.filename];
-            if (cached && cached.duration && cached.duration > 0) {
-              const cacheAge = Date.now() - (cached.cachedAt || 0);
-              if (cacheAge < 7 * 24 * 60 * 60 * 1000) duration = cached.duration;
-            }
-          } catch (err) {
-            console.warn('Failed to read video metadata cache:', err);
-          }
-        }
-
-        return {
-          ...v,
-          url: videoUrl,
-          duration,
-          id: v.id || `${v.filename || 'video'}-${Date.now()}-${Math.random()}`,
-        };
-      })
-      .filter((v) => v.url);
+    // Hydrate firework instances against the in-memory fireworks index.
+    const restoredVideos = session.fireworks
+      .map((inst) => hydrateInstance(inst, fireworksById))
+      .filter(Boolean);
 
     setVideos(restoredVideos);
     setTotalDuration(session.totalDuration || 60);
@@ -344,252 +326,129 @@ const FireworksPlanner = () => {
   };
 
   const handleBackToDashboard = () => {
-    // Only auto-save when current user actually owns the show. Without this
-    // check, an admin viewing another user's show would silently clone it
-    // under their own account on every navigation back to the dashboard.
-    const isOwner =
-      currentShowOwnerId == null || currentShowOwnerId === currentUser?.id;
-    if (currentShowName && videos.length > 0 && isOwner) {
+    // Project members all share editing on a project's shows; persist any
+    // outstanding edits before navigating back.
+    if (currentShowName && videos.length > 0) {
       saveShow(currentShowName, true);
     }
     setCurrentShowOwnerId(null);
     setCurrentShowName(null);
     setCurrentView('dashboard');
     setIsPlaying(false);
-    loadSessionsList();
+    if (currentProjectId) loadShowsList(currentProjectId);
   };
 
   const handleGoToLibrary = () => {
     setCurrentView('library');
-    loadAvailableVideos();
+    if (currentProjectId) loadFireworks(currentProjectId);
   };
 
   const handleBackFromLibrary = () => {
     setCurrentView('dashboard');
-    loadAvailableVideos();
+    if (currentProjectId) loadFireworks(currentProjectId);
   };
 
   const handleDeleteShow = async (name, ownerUserId = null) => {
-    const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-    localStorage.setItem(
-      'fwp_sessions',
-      JSON.stringify(sessions.filter((s) => s.name !== name)),
-    );
-    if (authenticated) {
-      try {
-        const url = new URL(
-          `${API_BASE}/api/shows/${encodeURIComponent(name)}`,
-        );
-        // Pass user_id when admin is deleting someone else's show; backend
-        // enforces admin-only for cross-user deletes.
-        if (ownerUserId != null && ownerUserId !== currentUser?.id) {
-          url.searchParams.set('user_id', String(ownerUserId));
-        }
-        await fetch(url.toString(), {
-          method: 'DELETE',
-          credentials: 'include',
-        });
-      } catch (err) {
-        console.warn('Failed to delete show from server:', err);
-      }
+    if (!currentProjectId) return;
+    try {
+      await fetch(
+        `${API_BASE}/api/projects/${currentProjectId}/shows/${encodeURIComponent(name)}`,
+        { method: 'DELETE', credentials: 'include' },
+      );
+    } catch (err) {
+      console.warn('Failed to delete show:', err);
     }
-    loadSessionsList();
+    loadShowsList(currentProjectId);
     showToast(`Deleted show "${name}"`, 'success');
   };
 
   const handleDownloadComplete = async (dl) => {
-    const isServerSideDownload =
-      dl.filename && dl.status === 'complete' && !dl.localUrl && (!dl.videoId || dl.serverSide);
-    if (isServerSideDownload) {
-      setTimeout(async () => {
-        await loadAvailableVideos();
-        showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
-      }, 500);
-      return;
-    }
+    // Server-side downloads now mint a firework + add to project inventory.
+    // We just refresh the firework list.
+    if (currentProjectId) await loadFireworks(currentProjectId);
     showToast(`Downloaded: ${dl.title || dl.filename || 'Video'}`, 'success');
   };
 
-  const handleDeleteVideo = async (video) => {
-    try {
-      await fetch(`${API_BASE}/api/videos/${video.filename}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      setDownloadedVideos((prev) => {
-        const newMap = new Map(prev);
-        newMap.delete(video.filename);
-        saveLibraryMetadata(newMap);
-        return newMap;
-      });
-      setVideos((prev) => prev.filter((v) => v.filename !== video.filename));
-      showToast(`"${video.title}" deleted`, 'success');
-    } catch (err) {
-      showToast('Failed to delete video: ' + err.message, 'error');
-    }
-  };
-
-  const handleSaveVideoSettings = async (filename, updates) => {
-    setDownloadedVideos((prev) => {
-      const newMap = new Map(prev);
-      const existing = newMap.get(filename);
-      if (!existing) return newMap;
-
-      const updated = { ...existing, ...updates };
-      newMap.set(filename, updated);
-
-      const metadata = {
-        title: updated.title,
-        sourceUrl: updated.sourceUrl,
-        duration: updated.duration,
-        defaultTrimStart: updated.defaultTrimStart || 0,
-        defaultTrimEnd: updated.defaultTrimEnd || 0,
-        defaultCropX: updated.defaultCropX || 0,
-        defaultCropY: updated.defaultCropY || 0,
-        defaultCropWidth: updated.defaultCropWidth || 100,
-        defaultCropHeight: updated.defaultCropHeight || 100,
-      };
-
-      if (authenticated) {
-        fetch(`${API_BASE}/api/library`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ filename, metadata }),
-        })
-          .then((res) => {
-            if (!res.ok) {
-              return res.json().then((err) => {
-                throw new Error(err.error || `Server error: ${res.status}`);
-              });
-            }
-            return res.json();
-          })
-          .catch((err) => {
-            console.error('Failed to save video settings:', err);
-            showToast(`Failed to save settings: ${err.message}`, 'error');
-          });
-      }
-
-      const libraryData = JSON.parse(localStorage.getItem('fwp_library') || '{}');
-      libraryData[filename] = metadata;
-      localStorage.setItem('fwp_library', JSON.stringify(libraryData));
-      return newMap;
-    });
-    showToast('Video settings saved', 'success');
-  };
-
-  const handleAddToLibrary = async (filename, title, defaults = {}) => {
-    if (!authenticated || !filename) return { ok: false, error: 'not authenticated' };
-    try {
-      // /api/library POST with metadata for this filename — server's
-      // save_library_metadata looks up the video by filename and creates
-      // the per-user library row (or updates if already there).
-      const metadata = { title: title || filename, ...defaults };
-      const res = await fetch(`${API_BASE}/api/library`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ filename, metadata }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        showToast(`Couldn't add to library: ${err.error || res.status}`, 'error');
-        return { ok: false, error: err.error || `HTTP ${res.status}` };
-      }
-      await loadAvailableVideos();
-      showToast(`Added "${title || filename}" to library`, 'success');
-      return { ok: true };
-    } catch (err) {
-      showToast(`Couldn't add to library: ${err.message}`, 'error');
-      return { ok: false, error: err.message };
-    }
-  };
-
-  // Push the current show-instance trim/crop back to the library entry as
-  // the new defaults. Existing library metadata (title, sourceUrl, duration)
-  // is preserved — server-side save_library_metadata replaces the whole
-  // metadata blob, so the merge has to happen on the client.
-  const handleSaveSettingsToLibrary = async (filename, settings) => {
-    if (!authenticated || !filename) return { ok: false, error: 'not authenticated' };
-    const existing = downloadedVideos.get(filename);
-    if (!existing) {
-      // Caller should have used handleAddToLibrary instead.
-      showToast('Video isn\'t in your library yet', 'warning');
-      return { ok: false, error: 'not in library' };
-    }
-    try {
-      const metadata = {
-        title: existing.title,
-        sourceUrl: existing.sourceUrl,
-        duration: existing.duration,
-        defaultTrimStart: existing.defaultTrimStart || 0,
-        defaultTrimEnd: existing.defaultTrimEnd || 0,
-        defaultCropX: existing.defaultCropX || 0,
-        defaultCropY: existing.defaultCropY || 0,
-        defaultCropWidth: existing.defaultCropWidth || 100,
-        defaultCropHeight: existing.defaultCropHeight || 100,
-        ...settings, // override with the show's current values
-      };
-      const res = await fetch(`${API_BASE}/api/library`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ filename, metadata }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        showToast(`Couldn't save: ${err.error || res.status}`, 'error');
-        return { ok: false, error: err.error || `HTTP ${res.status}` };
-      }
-      await loadAvailableVideos();
-      showToast(`Saved trim/crop to "${existing.title}"`, 'success');
-      return { ok: true };
-    } catch (err) {
-      showToast(`Couldn't save settings: ${err.message}`, 'error');
-      return { ok: false, error: err.message };
-    }
-  };
-
-  const handleAddFromLibrary = (videoData) => {
-    const initialDuration =
-      videoData.duration && videoData.duration > 0 ? videoData.duration : 0;
-
+  // Add a firework (already in project inventory) into the current show.
+  const handleAddFromLibrary = (firework) => {
     const newInstance = {
-      id: `${videoData.filename}-${Date.now()}`,
-      name: videoData.title || videoData.filename,
-      filename: videoData.filename,
-      url: videoData.url,
-      sourceUrl: videoData.sourceUrl,
+      id: `${firework.id}-${Date.now()}`,
+      firework_id: firework.id,
+      video_id: null,
+      name: firework.name,
+      filename: firework.primary_filename,
+      url: firework.primary_url,
       offset: 0,
-      duration: initialDuration,
+      duration: 0,
       volume: 1.0,
-      trimStart: videoData.defaultTrimStart || 0,
-      trimEnd: videoData.defaultTrimEnd || 0,
-      cropX: videoData.defaultCropX || 0,
-      cropY: videoData.defaultCropY || 0,
-      cropWidth: videoData.defaultCropWidth || 100,
-      cropHeight: videoData.defaultCropHeight || 100,
+      trimStart: firework.default_trim_start || 0,
+      trimEnd: firework.default_trim_end || 0,
+      cropX: firework.default_crop_x || 0,
+      cropY: firework.default_crop_y || 0,
+      cropWidth: firework.default_crop_width ?? 100,
+      cropHeight: firework.default_crop_height ?? 100,
       color: `hsl(${videos.length * 60}, 70%, 50%)`,
     };
     setVideos((prev) => [...prev, newInstance]);
 
-    if (!initialDuration && videoData.url) {
-      const tempVideo = document.createElement('video');
-      tempVideo.preload = 'metadata';
-      tempVideo.src = videoData.url;
-      tempVideo.crossOrigin = 'anonymous';
-      tempVideo.addEventListener('loadedmetadata', () => {
-        const duration = tempVideo.duration;
-        if (duration && duration > 0) {
-          setVideos((prev) =>
-            prev.map((v) => (v.id === newInstance.id ? { ...v, duration } : v)),
-          );
-        }
-        tempVideo.remove();
-      });
-      tempVideo.addEventListener('error', () => tempVideo.remove());
-      tempVideo.load();
+    if (!firework.primary_filename) {
+      showToast(`"${firework.name}" has no video yet`, 'warning');
+      return;
+    }
+    // Try to load duration via a temp video element so the timeline knows the length.
+    const tempVideo = document.createElement('video');
+    tempVideo.preload = 'metadata';
+    tempVideo.src = firework.primary_url;
+    tempVideo.crossOrigin = 'anonymous';
+    tempVideo.addEventListener('loadedmetadata', () => {
+      const duration = tempVideo.duration;
+      if (duration && duration > 0) {
+        setVideos((prev) =>
+          prev.map((v) => (v.id === newInstance.id ? { ...v, duration } : v)),
+        );
+      }
+      tempVideo.remove();
+    });
+    tempVideo.addEventListener('error', () => tempVideo.remove());
+    tempVideo.load();
+  };
+
+  // Push the show-instance trim/crop back to the firework's primary video defaults.
+  const handleSaveSettingsToLibrary = async (firework_id, settings) => {
+    if (!firework_id) return { ok: false };
+    const fw = fireworksById.get(firework_id);
+    if (!fw || !fw.primary_firework_video_id) {
+      showToast('Firework has no primary video to update', 'warning');
+      return { ok: false };
+    }
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/firework_videos/${fw.primary_firework_video_id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            default_trim_start: settings.defaultTrimStart,
+            default_trim_end: settings.defaultTrimEnd,
+            default_crop_x: settings.defaultCropX,
+            default_crop_y: settings.defaultCropY,
+            default_crop_width: settings.defaultCropWidth,
+            default_crop_height: settings.defaultCropHeight,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Couldn't save: ${err.error || res.status}`, 'error');
+        return { ok: false };
+      }
+      await loadFireworks(currentProjectId);
+      showToast(`Saved trim/crop to "${fw.name}"`, 'success');
+      return { ok: true };
+    } catch (err) {
+      showToast(`Couldn't save settings: ${err.message}`, 'error');
+      return { ok: false };
     }
   };
 
@@ -599,65 +458,27 @@ const FireworksPlanner = () => {
         if (!silent) showToast('Please enter a show name', 'warning');
         return;
       }
-
+      if (!currentProjectId) return;
       const sessionData = {
         totalDuration,
         zoom,
-        videos: videos.map((v) => ({
-          id: v.id,
-          name: v.name,
-          filename: v.filename,
-          url: null, // reconstructed from API_BASE on load
-          offset: v.offset,
-          duration: v.duration,
-          volume: v.volume,
-          trimStart: v.trimStart || 0,
-          trimEnd: v.trimEnd || 0,
-          cropX: v.cropX || 0,
-          cropY: v.cropY || 0,
-          cropWidth: v.cropWidth || 100,
-          cropHeight: v.cropHeight || 100,
-          color: v.color,
-        })),
+        fireworks: videos.map(dehydrateInstance),
       };
-
-      const session = {
-        name: name.trim(),
-        timestamp: new Date().toISOString(),
-        ...sessionData,
-      };
-      const sessions = JSON.parse(localStorage.getItem('fwp_sessions') || '[]');
-      const existingIndex = sessions.findIndex((s) => s.name === name.trim());
-      if (existingIndex >= 0) sessions[existingIndex] = session;
-      else sessions.push(session);
-      localStorage.setItem('fwp_sessions', JSON.stringify(sessions));
-      localStorage.setItem('fwp_lastSession', name.trim());
-
-      if (authenticated) {
-        try {
-          await fetch(`${API_BASE}/api/shows`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ name: name.trim(), data: sessionData }),
-          });
-        } catch (err) {
-          console.warn('Failed to sync show to server:', err);
-        }
+      try {
+        await fetch(`${API_BASE}/api/projects/${currentProjectId}/shows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ name: name.trim(), data: sessionData }),
+        });
+      } catch (err) {
+        console.warn('Failed to save show to server:', err);
       }
-
-      loadSessionsList();
+      loadShowsList(currentProjectId);
       setCurrentShowName(name.trim());
       if (!silent) showToast(`Show "${name.trim()}" saved!`, 'success');
     },
-    [
-      totalDuration,
-      zoom,
-      videos,
-      authenticated,
-      loadSessionsList,
-      showToast,
-    ],
+    [totalDuration, zoom, videos, currentProjectId, loadShowsList, showToast],
   );
 
   // Auto-save (debounced)
@@ -667,12 +488,6 @@ const FireworksPlanner = () => {
       prevVideosStateRef.current = null;
       return;
     }
-    // Don't auto-save when the current user doesn't own the show. Admin
-    // viewing another user's show is read-only at the persistence layer;
-    // they can still scrub / preview / fork via Save As.
-    const isOwner =
-      currentShowOwnerId == null || currentShowOwnerId === currentUser?.id;
-    if (!isOwner) return;
     const hasAnyVideosLoaded = videos.some((v) => v.duration && v.duration > 0);
     if (!hasAnyVideosLoaded) return;
 
@@ -680,7 +495,7 @@ const FireworksPlanner = () => {
       videos
         .map((v) => ({
           id: v.id,
-          filename: v.filename,
+          firework_id: v.firework_id,
           offset: v.offset,
           trimStart: v.trimStart,
           trimEnd: v.trimEnd,
@@ -691,10 +506,13 @@ const FireworksPlanner = () => {
           volume: v.volume,
           color: v.color,
         }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
+        .sort((a, b) => String(a.id).localeCompare(String(b.id))),
     );
-
-    const fullState = JSON.stringify({ videos: currentVideosState, totalDuration, zoom });
+    const fullState = JSON.stringify({
+      videos: currentVideosState,
+      totalDuration,
+      zoom,
+    });
     if (fullState === prevVideosStateRef.current) return;
     prevVideosStateRef.current = fullState;
 
@@ -711,7 +529,7 @@ const FireworksPlanner = () => {
     saveShow,
   ]);
 
-  // Playback loop
+  // Playback loop (unchanged from prior version)
   React.useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
@@ -746,7 +564,6 @@ const FireworksPlanner = () => {
       cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
     }
-
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
@@ -755,13 +572,12 @@ const FireworksPlanner = () => {
     };
   }, [isPlaying, totalDuration]);
 
-  // Per-frame video sync — drives playback of all child videos against masterTime
+  // Per-frame sync (unchanged)
   React.useEffect(() => {
     videos.forEach((video) => {
       const videoEl = videoRefs.current[video.id];
       if (!videoEl) return;
       if (!video.duration || video.duration <= 0) return;
-
       videoEl.volume = video.volume || 1.0;
       const trimStart = video.trimStart || 0;
       const trimEnd = video.trimEnd || 0;
@@ -771,7 +587,6 @@ const FireworksPlanner = () => {
 
       if (videoTime >= 0 && videoTime <= trimmedDuration) {
         const actualVideoTime = videoTime + trimStart;
-
         if (videoEl.paused) {
           if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
             videoEl.currentTime = actualVideoTime;
@@ -779,15 +594,14 @@ const FireworksPlanner = () => {
         } else if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.5) {
           videoEl.currentTime = actualVideoTime;
         }
-
         if (isPlaying && videoEl.paused) {
           if (videoEl.readyState >= 2) {
-            const videoContainer = videoEl.parentElement;
-            if (videoContainer) {
-              const computedStyle = window.getComputedStyle(videoContainer);
-              if (computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
-                videoContainer.style.visibility = 'visible';
-                videoContainer.style.opacity = '1';
+            const container = videoEl.parentElement;
+            if (container) {
+              const cs = window.getComputedStyle(container);
+              if (cs.visibility === 'hidden' || cs.opacity === '0') {
+                container.style.visibility = 'visible';
+                container.style.opacity = '1';
               }
             }
             if (Math.abs(videoEl.currentTime - actualVideoTime) > 0.1) {
@@ -795,7 +609,6 @@ const FireworksPlanner = () => {
             }
             videoEl.volume = video.volume || 1.0;
             if (video.volume > 0) videoEl.muted = false;
-
             const playPromise = videoEl.play();
             if (playPromise !== undefined) {
               playPromise.catch((err) => {
@@ -816,6 +629,15 @@ const FireworksPlanner = () => {
     });
   }, [masterTime, videos, isPlaying]);
 
+  // ---------- Project switcher (header) ----------
+  const handleProjectSwitch = (projectId) => {
+    setCurrentProjectId(projectId);
+    setCurrentView('dashboard');
+    setVideos([]);
+    setCurrentShowName(null);
+    setCurrentShowOwnerId(null);
+  };
+
   // ---------- Render ----------
   if (checkingAuth) {
     return (
@@ -832,6 +654,46 @@ const FireworksPlanner = () => {
     return <LoginView onLogin={handleLogin} />;
   }
 
+  if (projects.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white flex items-center justify-center p-6">
+        <div className="bg-gray-800/80 rounded-lg p-8 max-w-md text-center border border-purple-500/30">
+          <div className="text-4xl mb-4">🎆</div>
+          <h2 className="text-xl font-bold mb-2">No projects yet</h2>
+          <p className="text-gray-400 mb-4">
+            You're signed in but you don't have access to any projects. Ask an
+            admin to add you to one, or create a new project below.
+          </p>
+          <button
+            className="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded font-bold"
+            onClick={async () => {
+              const name = window.prompt('Project name (e.g. "2027 - 4th of July"):');
+              if (!name?.trim()) return;
+              const res = await fetch(`${API_BASE}/api/projects`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ name: name.trim() }),
+              });
+              if (res.ok) {
+                const proj = await res.json();
+                setProjects([proj]);
+                setCurrentProjectId(proj.id);
+              }
+            }}
+          >
+            + Create Project
+          </button>
+          <button onClick={handleLogout} className="block mt-4 text-sm text-gray-400 underline w-full">
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentProject = projects.find((p) => p.id === currentProjectId);
+
   return (
     <div>
       {currentView === 'dashboard' && (
@@ -841,19 +703,20 @@ const FireworksPlanner = () => {
           onGoToLibrary={handleGoToLibrary}
           savedSessions={savedSessions}
           onDeleteShow={handleDeleteShow}
-          downloadedVideos={downloadedVideos}
+          fireworks={fireworks}
           onDownloadComplete={handleDownloadComplete}
           currentUser={currentUser}
+          currentProject={currentProject}
+          projects={projects}
+          onSwitchProject={handleProjectSwitch}
           onLogout={handleLogout}
         />
       )}
       {currentView === 'library' && (
         <LibraryView
-          downloadedVideos={downloadedVideos}
-          setDownloadedVideos={setDownloadedVideos}
+          fireworks={fireworks}
+          currentProject={currentProject}
           onBack={handleBackFromLibrary}
-          onDeleteVideo={handleDeleteVideo}
-          onSaveVideoSettings={handleSaveVideoSettings}
           onDownloadComplete={handleDownloadComplete}
         />
       )}
@@ -862,7 +725,8 @@ const FireworksPlanner = () => {
           showName={currentShowName}
           videos={videos}
           setVideos={setVideos}
-          downloadedVideos={downloadedVideos}
+          fireworks={fireworks}
+          fireworksById={fireworksById}
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
           masterTime={masterTime}
@@ -884,20 +748,11 @@ const FireworksPlanner = () => {
           onSave={saveShow}
           onBack={handleBackToDashboard}
           onAddFromLibrary={handleAddFromLibrary}
-          onAddToLibrary={handleAddToLibrary}
           onSaveSettingsToLibrary={handleSaveSettingsToLibrary}
           onDownloadComplete={handleDownloadComplete}
           showToast={showToast}
-          isReadOnly={
-            currentShowOwnerId != null && currentShowOwnerId !== currentUser?.id
-          }
-          ownerLabel={
-            currentShowOwnerId != null && currentShowOwnerId !== currentUser?.id
-              ? savedSessions.find(
-                  (s) => s.user_id === currentShowOwnerId && s.name === currentShowName,
-                )?.creator_username || 'another user'
-              : null
-          }
+          isReadOnly={false}
+          ownerLabel={null}
         />
       )}
 

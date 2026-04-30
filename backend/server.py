@@ -366,6 +366,14 @@ downloads = {}
 # Initialize database on startup
 init_db()
 
+# Apply any pending migrations (idempotent — safe to call on every boot).
+from migrations import run_pending_migrations  # noqa: E402
+run_pending_migrations()
+
+# Project / firework / show routes (post-migration model).
+from routes_projects import bp as projects_bp  # noqa: E402
+app.register_blueprint(projects_bp)
+
 
 def get_current_user_id():
     """Get current user ID from session"""
@@ -1161,19 +1169,73 @@ def upload_video():
             else:
                 raise Exception("create_video returned None")
         
-        # Add to user's library
-        if video_db_id:
-            add_video_to_library(user_id, video_db_id, {
-                "title": title,
-                "sourceUrl": youtube_url if youtube_url else f"uploaded:{filename}"
-            })
-            print(f"[upload] ✓ Video added to user's library")
-        
+        # ---- New (post-migration 001) model -----------------------------
+        # 1. Resolve target project (form-supplied or user's first project).
+        # 2. Verify the user is at least an editor of that project.
+        # 3. Create or reuse a firework wrapping this video, then add it to
+        #    the project's inventory.
+        from projects_db import (
+            list_projects_for_user, get_member_role,
+            create_firework, attach_video_to_firework, add_firework_to_project,
+        )
+
+        target_project_id = request.form.get("project_id", type=int)
+        if not target_project_id:
+            user_projects = list_projects_for_user(user_id)
+            if not user_projects:
+                return jsonify({"error": "User is not a member of any project"}), 400
+            target_project_id = user_projects[0]["id"]
+            print(f"[upload] No project_id provided; defaulting to {target_project_id}")
+
+        role = get_member_role(target_project_id, user_id)
+        if role not in ("editor", "owner"):
+            return jsonify({"error": "Not an editor of that project"}), 403
+
+        # Check if there's already a firework for this video (any user could
+        # have created it). If so, reuse it; otherwise create a new one.
+        from database import get_db, execute_sql, fetch_one
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            execute_sql(cur, """
+                SELECT firework_id FROM firework_videos
+                WHERE video_id = %s AND is_primary
+                ORDER BY id ASC LIMIT 1
+            """, (video_db_id,))
+            row = fetch_one(cur)
+            firework_id = row["firework_id"] if row else None
+        finally:
+            conn.close()
+
+        if not firework_id:
+            firework_id = create_firework(
+                name=title or filename,
+                created_by=user_id,
+                visibility="project",
+            )
+            attach_video_to_firework(
+                firework_id=firework_id,
+                video_id=video_db_id,
+                created_by=user_id,
+                kind="user",
+                is_primary=True,
+            )
+            print(f"[upload] ✓ Firework created (id={firework_id}) wrapping video {video_db_id}")
+        else:
+            print(f"[upload] Firework already exists (id={firework_id}); reusing")
+
+        add_firework_to_project(
+            target_project_id, firework_id, added_by=user_id,
+        )
+        print(f"[upload] ✓ Added firework to project {target_project_id} inventory")
+
         return jsonify({
             "success": True,
             "video_id": video_db_id,
             "filename": filename,
-            "message": "Video uploaded successfully"
+            "firework_id": firework_id,
+            "project_id": target_project_id,
+            "message": "Video uploaded and added to project library",
         })
         
     except Exception as e:
@@ -1226,108 +1288,17 @@ def extract_video_id_from_url(url):
 
 
 @app.route("/api/videos", methods=["GET"])
-def list_videos():
-    """List videos in user's library (only shows videos the user has added)"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    user_id = get_current_user_id()
-    user_library = get_user_library(user_id)
-    
-    videos = []
-    # Only show videos that are in the user's library
-    for filename, metadata in user_library.items():
-        # Check if file exists in R2 or locally
-        file_exists = False
-        file_size = None
-        
-        if R2_ENABLED and file_exists_in_r2(filename):
-            file_exists = True
-            file_size = get_file_size_from_r2(filename) or 0
-        else:
-            filepath = VIDEOS_DIR / filename
-            if filepath.exists():
-                file_exists = True
-                file_size = filepath.stat().st_size
-        
-        if file_exists:
-            videos.append({
-                "id": filename.split('.')[0],  # Use filename without extension as ID
-                "filename": filename,
-                "title": metadata.get("title", filename),
-                "size": file_size
-            })
-    
-    return jsonify(videos)
+def legacy_videos_list():
+    """Replaced by /api/projects/<project_id>/fireworks."""
+    return _gone("GET /api/projects/<project_id>/fireworks")
 
 
 @app.route("/api/videos/<filename>", methods=["DELETE"])
-def delete_video(filename):
-    """Remove video from user's library (only deletes file if no other users have it)"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    user_id = get_current_user_id()
-    
-    # Remove from user's library
-    removed = remove_video_from_library(user_id, filename)
-    
-    if not removed:
-        return jsonify({"error": "Video not found in your library"}), 404
-    
-    # Check if any other users still have this video
-    video = get_video_by_filename(filename)
-    if video:
-        ref_count = get_video_reference_count(video['id'])
-        
-        if ref_count == 0:
-            # No other users have it - delete the file
-            filepath = VIDEOS_DIR / filename
-            files_deleted = []
-            
-            # Delete from R2 if enabled
-            if R2_ENABLED:
-                if delete_from_r2(filename):
-                    files_deleted.append(f"{filename} (R2)")
-            
-            # Delete local file if it exists
-            if filepath.exists():
-                filepath.unlink()
-                files_deleted.append(filename)
-            
-            # Also try to delete related files
-            base_id = filename.split('.')[0]
-            for related_file in VIDEOS_DIR.glob(f"{base_id}.*"):
-                if related_file.name != filename and related_file.exists():
-                    related_file.unlink()
-                    files_deleted.append(related_file.name)
-            
-            # Delete from videos table (CASCADE will clean up library references)
-            from database import get_db, execute_sql
-            conn = get_db()
-            cursor = conn.cursor()
-            execute_sql(cursor, 'DELETE FROM videos WHERE id = ?', (video['id'],))
-            conn.commit()
-            conn.close()
-            
-            return jsonify({
-                "success": True,
-                "deleted_from_library": True,
-                "file_deleted": True,
-                "deleted_files": files_deleted,
-                "message": "Video removed from your library and deleted (no other users had it)"
-            })
-        else:
-            return jsonify({
-                "success": True,
-                "deleted_from_library": True,
-                "file_deleted": False,
-                "message": f"Video removed from your library (still used by {ref_count} other user(s))"
-            })
-    
-    return jsonify({"success": True, "deleted_from_library": True})
+def legacy_video_delete(filename):
+    """Replaced by DELETE /api/projects/<project_id>/fireworks/<firework_id>."""
+    return _gone("DELETE /api/projects/<project_id>/fireworks/<firework_id>")
+
+
 
 
 @app.route("/videos/<filename>")
@@ -1547,6 +1518,12 @@ def get_current_user():
         has_cookies = get_user_youtube_cookies(user_id) is not None
         user["has_youtube_cookies"] = has_cookies
         user["is_admin"] = is_admin(user_id)
+
+        # Projects the user is a member of, with role. The frontend uses
+        # the first one as the default active project.
+        from projects_db import list_projects_for_user
+        user["projects"] = list_projects_for_user(user_id)
+
         return jsonify({"authenticated": True, "user": user})
     else:
         session.clear()
@@ -1758,185 +1735,40 @@ def google_callback():
 # User Data Routes
 # ======================
 
-@app.route("/api/shows", methods=["GET"])
-def get_shows():
-    """Get shows. Admins see all shows (with creator info); everyone else sees their own."""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
+# --- Legacy endpoints --------------------------------------------------------
+# Migration 001 collapsed library-per-user into project_fireworks. The
+# replacements live in routes_projects.py at /api/projects/:id/{shows,fireworks}.
+# Old clients that still hit these get a 410 with a useful hint.
 
-    user_id = get_current_user_id()
-    if is_admin(user_id):
-        shows = get_all_shows_with_creators()
-    else:
-        shows = get_user_shows(user_id)
-        for show in shows:
-            # Non-admin GET still gets their own user_id stamped so the frontend
-            # can pass it through to delete/edit calls uniformly.
-            show.setdefault('user_id', user_id)
-
-    # Reconstruct video URLs from current server base URL.
-    base_url = request.url_root.rstrip('/')
-    for show in shows:
-        if 'data' in show and 'videos' in show['data']:
-            for video in show['data']['videos']:
-                video_url = video.get('url')
-                if video.get('filename'):
-                    if video_url is None or (isinstance(video_url, str) and not video_url.startswith('blob:')):
-                        video['url'] = f"{base_url}/videos/{video['filename']}"
-
-    return jsonify(shows)
+def _gone(replacement):
+    return jsonify({"error": "Endpoint replaced", "use_instead": replacement}), 410
 
 
-@app.route("/api/shows", methods=["POST"])
-def save_show_endpoint():
-    """Save a show"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    data = request.json
-    show_name = data.get("name", "").strip()
-    show_data = data.get("data", {})
-    
-    if not show_name:
-        return jsonify({"error": "Show name required"}), 400
-    
-    user_id = get_current_user_id()
-    save_show(user_id, show_name, show_data)
-    return jsonify({"success": True})
+@app.route("/api/shows", methods=["GET", "POST"])
+def legacy_shows_collection():
+    return _gone("GET/POST /api/projects/<project_id>/shows")
 
 
 @app.route("/api/shows/<show_name>", methods=["DELETE"])
-def delete_show_endpoint(show_name):
-    """Delete a show. Admins may delete another user's show by passing ?user_id=N."""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-
-    user_id = get_current_user_id()
-    target_user_id = request.args.get('user_id', type=int)
-
-    if target_user_id and target_user_id != user_id:
-        if not is_admin(user_id):
-            return jsonify({"error": "Not authorized"}), 403
-        deleted = delete_show(target_user_id, show_name)
-    else:
-        deleted = delete_show(user_id, show_name)
-
-    if deleted:
-        return jsonify({"success": True})
-    return jsonify({"error": "Show not found"}), 404
+def legacy_show_delete(show_name):
+    return _gone("DELETE /api/projects/<project_id>/shows/<name>")
 
 
-@app.route("/api/library", methods=["GET"])
-def get_library():
-    """Get library metadata for current user"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    user_id = get_current_user_id()
-    library = get_user_library(user_id)
-    return jsonify(library)
-
-
-@app.route("/api/library", methods=["POST"])
-def save_library_endpoint():
-    """Save library metadata"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-        
-        filename = data.get("filename")
-        metadata = data.get("metadata", {})
-        
-        if not filename:
-            return jsonify({"error": "Filename required"}), 400
-        
-        user_id = get_current_user_id()
-        print(f"Saving library metadata for user {user_id}, filename: {filename}")
-        print(f"Metadata keys: {list(metadata.keys())}")
-        
-        result = save_library_metadata(user_id, filename, metadata)
-        
-        if result is None:
-            # Video doesn't exist in shared storage - try to create it
-            print(f"Video {filename} not found in shared storage, attempting to create entry...")
-            from pathlib import Path
-            videos_dir = Path(__file__).parent / "videos"
-            filepath = videos_dir / filename
-            
-            if filepath.exists():
-                print(f"File exists, creating video entry...")
-                file_size = filepath.stat().st_size
-                from database import create_video, add_video_to_library
-                video_id = create_video(filename, None, metadata.get("title", filename), file_size)
-                if video_id:
-                    add_video_to_library(user_id, video_id, metadata)
-                    print(f"Created video entry and added to library")
-                    return jsonify({"success": True})
-            else:
-                print(f"File {filename} does not exist in videos directory")
-                return jsonify({"error": f"Video file not found: {filename}"}), 404
-        
-        print(f"Successfully saved library metadata")
-        return jsonify({"success": True})
-    except Exception as e:
-        print(f"Error saving library metadata: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+@app.route("/api/library", methods=["GET", "POST"])
+def legacy_library_collection():
+    return _gone("GET/POST /api/projects/<project_id>/fireworks")
 
 
 @app.route("/api/library/<filename>", methods=["DELETE"])
-def delete_library_endpoint(filename):
-    """Delete library metadata"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    user_id = get_current_user_id()
-    deleted = delete_library_item(user_id, filename)
-    if deleted:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"error": "Library item not found"}), 404
+def legacy_library_delete(filename):
+    return _gone("DELETE /api/projects/<project_id>/fireworks/<firework_id>")
 
 
 @app.route("/api/cleanup", methods=["POST"])
-def cleanup_videos():
-    """Clean up orphaned videos (videos with no library references)"""
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
-    
-    deleted_files = cleanup_orphaned_videos()
-    
-    # Also delete the actual files from R2 and local storage
-    files_deleted = []
-    for filename in deleted_files:
-        # Delete from R2 if enabled
-        if R2_ENABLED:
-            if delete_from_r2(filename):
-                files_deleted.append(f"{filename} (R2)")
-        
-        # Delete local file if it exists
-        filepath = VIDEOS_DIR / filename
-        if filepath.exists():
-            filepath.unlink()
-            files_deleted.append(filename)
-    
-    return jsonify({
-        "success": True,
-        "orphaned_videos_removed": len(deleted_files),
-        "files_deleted": files_deleted
-    })
+def legacy_cleanup_videos():
+    """Replaced — orphan logic now keys off firework_videos rather than the
+    archived library table. Will be reintroduced in a follow-up."""
+    return _gone("(deferred — re-implement against firework_videos)")
 
 
 @app.route("/api/debug/downloads", methods=["GET"])

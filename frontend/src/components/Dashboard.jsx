@@ -8,11 +8,20 @@ const Dashboard = ({
   onGoToLibrary,
   savedSessions,
   onDeleteShow,
-  downloadedVideos,
+  fireworks,
   onDownloadComplete,
   currentUser,
+  currentProject,
+  projects,
+  onSwitchProject,
   onLogout,
 }) => {
+  // Backward-compat shim: the Dashboard has lots of references like
+  // `downloadedVideos.size` from the legacy code. We expose a tiny shim so
+  // the existing JSX continues to read sensible values.
+  const downloadedVideos = React.useMemo(() => ({
+    size: fireworks?.length || 0,
+  }), [fireworks]);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
   const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
@@ -155,6 +164,23 @@ const Dashboard = ({
                 ? `Welcome, ${currentUser.username}!`
                 : 'Plan your perfect fireworks show'}
             </p>
+            {/* Project switcher */}
+            {projects && projects.length > 0 && (
+              <div className="mt-3 flex items-center gap-2">
+                <label className="text-xs text-gray-400">Project:</label>
+                <select
+                  value={currentProject?.id || ''}
+                  onChange={(e) => onSwitchProject?.(parseInt(e.target.value, 10))}
+                  className="bg-gray-800 border border-purple-500/40 text-white text-sm px-3 py-1 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.role !== 'editor' ? `(${p.role})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <button
@@ -195,7 +221,7 @@ const Dashboard = ({
             onClick={onGoToLibrary}
           >
             <div className="text-3xl font-bold text-blue-400">{downloadedVideos.size}</div>
-            <div className="text-sm text-gray-400 mt-1">Videos in Library</div>
+            <div className="text-sm text-gray-400 mt-1">Fireworks in Project</div>
           </div>
           <div className="bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30">
             <div
@@ -260,7 +286,7 @@ const Dashboard = ({
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <h3 className="text-xl font-bold text-white">{session.name}</h3>
                               <span className="text-xs px-2 py-1 bg-purple-600 rounded">
-                                {`${session.videos.length} items`}
+                                {`${(session.fireworks || session.videos || []).length} items`}
                               </span>
                               {ownerLabel && (
                                 <span
@@ -394,10 +420,10 @@ const Dashboard = ({
               onClick={onGoToLibrary}
             >
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-bold text-green-300">📚 Library</h2>
-                <span className="text-sm text-gray-400">{downloadedVideos.size} videos</span>
+                <h2 className="text-xl font-bold text-green-300">📚 Fireworks Library</h2>
+                <span className="text-sm text-gray-400">{downloadedVideos.size} fireworks</span>
               </div>
-              <p className="text-sm text-gray-400 mb-3">Manage your video collection</p>
+              <p className="text-sm text-gray-400 mb-3">Manage this project's fireworks</p>
               <button className="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition">
                 Manage Library →
               </button>
