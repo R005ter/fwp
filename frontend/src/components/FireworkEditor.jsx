@@ -19,6 +19,231 @@ const dollarsToCents = (s) => {
 };
 
 /**
+ * Row for one firework_video inside the Videos panel.
+ * Manages its own dirty state; auto-saves on blur via a small Save button
+ * so a user can fiddle with values without each keystroke firing a PATCH.
+ */
+const FireworkVideoRow = ({ video, onChanged, showToast }) => {
+  const [kind, setKind] = React.useState(video.kind || 'user');
+  const [trimStart, setTrimStart] = React.useState(video.default_trim_start ?? 0);
+  const [trimEnd, setTrimEnd] = React.useState(video.default_trim_end ?? 0);
+  const [cropX, setCropX] = React.useState(video.default_crop_x ?? 0);
+  const [cropY, setCropY] = React.useState(video.default_crop_y ?? 0);
+  const [cropW, setCropW] = React.useState(video.default_crop_width ?? 100);
+  const [cropH, setCropH] = React.useState(video.default_crop_height ?? 100);
+  const [busy, setBusy] = React.useState(false);
+
+  const dirty =
+    kind !== (video.kind || 'user') ||
+    trimStart !== (video.default_trim_start ?? 0) ||
+    trimEnd !== (video.default_trim_end ?? 0) ||
+    cropX !== (video.default_crop_x ?? 0) ||
+    cropY !== (video.default_crop_y ?? 0) ||
+    cropW !== (video.default_crop_width ?? 100) ||
+    cropH !== (video.default_crop_height ?? 100);
+
+  const patch = async (body) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/firework_videos/${video.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast?.(`Save failed: ${err.error || res.status}`, 'error');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      showToast?.(`Save failed: ${err.message}`, 'error');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSave = async () => {
+    const ok = await patch({
+      kind,
+      default_trim_start: parseFloat(trimStart) || 0,
+      default_trim_end: parseFloat(trimEnd) || 0,
+      default_crop_x: parseFloat(cropX) || 0,
+      default_crop_y: parseFloat(cropY) || 0,
+      default_crop_width: parseFloat(cropW) || 100,
+      default_crop_height: parseFloat(cropH) || 100,
+    });
+    if (ok) {
+      showToast?.('Saved', 'success');
+      onChanged?.();
+    }
+  };
+
+  const onSetPrimary = async () => {
+    const ok = await patch({ is_primary: true });
+    if (ok) {
+      showToast?.('Set as primary', 'success');
+      onChanged?.();
+    }
+  };
+
+  const onRemove = async () => {
+    if (!window.confirm(
+      `Remove this video link from the firework?\n\n` +
+      `The video file itself stays in storage; this just unlinks it.`
+    )) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/firework_videos/${video.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast?.(`Remove failed: ${err.error || res.status}`, 'error');
+        return;
+      }
+      showToast?.('Video unlinked', 'success');
+      onChanged?.();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const numCls =
+    'bg-gray-700 px-2 py-1 rounded text-xs w-20 focus:outline-none focus:ring-2 focus:ring-orange-500';
+
+  return (
+    <div className="bg-gray-900/40 p-3 rounded">
+      <div className="flex items-start gap-4 mb-3">
+        <video
+          src={video.url}
+          className="w-40 h-24 object-cover bg-black rounded flex-shrink-0"
+          preload="metadata"
+          controls
+        />
+        <div className="flex-1 min-w-0 text-sm">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium truncate">
+              {video.video_title || video.filename}
+            </span>
+            {video.is_primary ? (
+              <span className="text-[10px] uppercase tracking-wide bg-orange-600/40 border border-orange-400/60 text-orange-100 px-2 py-0.5 rounded">
+                primary
+              </span>
+            ) : (
+              <button
+                onClick={onSetPrimary}
+                disabled={busy}
+                className="text-[10px] uppercase tracking-wide bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded"
+              >
+                set as primary
+              </button>
+            )}
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+              className="text-xs bg-gray-700 px-2 py-0.5 rounded"
+            >
+              <option value="user">user</option>
+              <option value="manufacturer">manufacturer</option>
+              <option value="review">review</option>
+            </select>
+          </div>
+          <div className="text-xs text-gray-400 truncate mt-1">{video.filename}</div>
+        </div>
+        <button
+          onClick={onRemove}
+          disabled={busy}
+          className="text-xs bg-red-700/70 hover:bg-red-700 px-3 py-1 rounded shrink-0"
+          title="Unlink this video from the firework"
+        >
+          🗑️ Unlink
+        </button>
+      </div>
+
+      {/* Default trim + crop */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Trim start</span>
+          <input
+            type="number" step="0.1" min="0"
+            value={trimStart}
+            onChange={(e) => setTrimStart(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">s</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Trim end</span>
+          <input
+            type="number" step="0.1" min="0"
+            value={trimEnd}
+            onChange={(e) => setTrimEnd(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">s</span>
+        </label>
+        <div />
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Crop X</span>
+          <input
+            type="number" step="1" min="0" max="100"
+            value={cropX}
+            onChange={(e) => setCropX(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">%</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Crop Y</span>
+          <input
+            type="number" step="1" min="0" max="100"
+            value={cropY}
+            onChange={(e) => setCropY(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">%</span>
+        </label>
+        <div />
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Crop W</span>
+          <input
+            type="number" step="1" min="1" max="100"
+            value={cropW}
+            onChange={(e) => setCropW(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">%</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-gray-400 w-20">Crop H</span>
+          <input
+            type="number" step="1" min="1" max="100"
+            value={cropH}
+            onChange={(e) => setCropH(e.target.value)}
+            className={numCls}
+          />
+          <span className="text-gray-500">%</span>
+        </label>
+        <div className="flex items-center justify-end">
+          <button
+            onClick={onSave}
+            disabled={!dirty || busy}
+            className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-3 py-1 rounded font-medium"
+          >
+            {busy ? '…' : dirty ? '💾 Save' : 'Saved'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+/**
  * Detail/edit view for one firework.
  *
  * Loads /api/fireworks/:id on mount (so we get the videos list, which the
@@ -406,50 +631,28 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
           ) : (
             <div className="space-y-3">
               {original.videos.map((v) => (
-                <div
+                <FireworkVideoRow
                   key={v.id}
-                  className="flex items-start gap-4 bg-gray-900/40 p-3 rounded"
-                >
-                  <video
-                    src={v.url}
-                    className="w-32 h-20 object-cover bg-black rounded flex-shrink-0"
-                    preload="metadata"
-                    controls
-                  />
-                  <div className="flex-1 min-w-0 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">
-                        {v.video_title || v.filename}
-                      </span>
-                      {v.is_primary && (
-                        <span className="text-[10px] uppercase tracking-wide bg-orange-600/40 border border-orange-400/60 text-orange-100 px-2 py-0.5 rounded">
-                          primary
-                        </span>
-                      )}
-                      <span className="text-[10px] text-gray-500">
-                        ({v.kind})
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-400 truncate">
-                      {v.filename}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Default trim {(v.default_trim_start || 0).toFixed(1)}s –{' '}
-                      {(v.default_trim_end || 0).toFixed(1)}s · crop{' '}
-                      {(v.default_crop_x || 0).toFixed(0)}/
-                      {(v.default_crop_y || 0).toFixed(0)} ·{' '}
-                      {(v.default_crop_width ?? 100).toFixed(0)}×
-                      {(v.default_crop_height ?? 100).toFixed(0)}
-                    </div>
-                  </div>
-                </div>
+                  video={v}
+                  showToast={showToast}
+                  onChanged={async () => {
+                    // Refetch to pick up any field updates / primary swaps.
+                    const res = await fetch(`${API_BASE}/api/fireworks/${fireworkId}`, {
+                      credentials: 'include',
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setOriginal(data);
+                    }
+                  }}
+                />
               ))}
             </div>
           )}
           <p className="text-[11px] text-gray-500 mt-3">
-            Add/remove videos and reset defaults — coming in a follow-up. For now
-            the show editor's <strong>💾 → Default</strong> chip writes to the
-            primary video's defaults when your show-instance trim/crop diverges.
+            Adding alternate videos to an existing firework — coming in a
+            follow-up. For now the desktop downloader creates a fresh firework
+            per upload.
           </p>
         </div>
       </div>

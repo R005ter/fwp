@@ -298,6 +298,13 @@ def attach_video_to_firework(*,
 
 
 def update_firework_video(firework_video_id: int, patch: dict) -> bool:
+    """Patch a firework_video row.
+
+    is_primary is special-cased: setting it true demotes any other row on
+    the same firework first (the partial unique index would otherwise fail).
+    Setting it false is allowed (firework will have no primary until another
+    is_primary=true is set; UI should prevent leaving zero primaries).
+    """
     cols = {
         "default_trim_start", "default_trim_end",
         "default_crop_x", "default_crop_y", "default_crop_width", "default_crop_height",
@@ -308,15 +315,48 @@ def update_firework_video(firework_video_id: int, patch: dict) -> bool:
         if c in patch:
             sets.append(f"{c} = %s")
             params.append(patch[c])
-    if not sets:
+
+    set_primary = patch.get("is_primary")  # may be None / True / False
+
+    if not sets and set_primary is None:
         return False
-    params.append(firework_video_id)
 
     conn = get_db()
     cur = conn.cursor()
     try:
-        execute_sql(cur, f"UPDATE firework_videos SET {', '.join(sets)} WHERE id = %s",
-                    tuple(params))
+        if set_primary is True:
+            # Find the firework_id this row belongs to so we can demote peers.
+            execute_sql(cur,
+                "SELECT firework_id FROM firework_videos WHERE id = %s",
+                (firework_video_id,)
+            )
+            row = fetch_one(cur)
+            if not row:
+                return False
+            execute_sql(cur, """
+                UPDATE firework_videos SET is_primary = FALSE
+                WHERE firework_id = %s AND id <> %s
+            """, (row["firework_id"], firework_video_id))
+            sets.append("is_primary = TRUE")
+        elif set_primary is False:
+            sets.append("is_primary = FALSE")
+
+        if sets:
+            params.append(firework_video_id)
+            execute_sql(cur, f"UPDATE firework_videos SET {', '.join(sets)} WHERE id = %s",
+                        tuple(params))
+
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def delete_firework_video(firework_video_id: int) -> bool:
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        execute_sql(cur, "DELETE FROM firework_videos WHERE id = %s", (firework_video_id,))
         conn.commit()
         return cur.rowcount > 0
     finally:

@@ -264,6 +264,15 @@ def patch_firework_video(fv_id):
     return jsonify({"ok": ok})
 
 
+@bp.route("/api/firework_videos/<int:fv_id>", methods=["DELETE"])
+def delete_firework_video_endpoint(fv_id):
+    uid, err = _require_auth()
+    if err:
+        return err
+    ok = pdb.delete_firework_video(fv_id)
+    return jsonify({"ok": ok})
+
+
 # ---------------------------------------------------------------------------
 # Shows (project-scoped)
 # ---------------------------------------------------------------------------
