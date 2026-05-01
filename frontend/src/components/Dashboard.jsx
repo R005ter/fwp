@@ -3,6 +3,21 @@ import { API_BASE, extractVideoId } from '../api.js';
 import AdminDesktopDownload from './AdminDesktopDownload.jsx';
 import ProjectSettings from './ProjectSettings.jsx';
 
+const THEME_KEY = 'fwp_theme';
+const THEMES = ['ember', 'midnight'];
+
+const useTheme = () => {
+  const [theme, setTheme] = React.useState(() => {
+    if (typeof window === 'undefined') return 'ember';
+    return localStorage.getItem(THEME_KEY) || 'ember';
+  });
+  React.useEffect(() => {
+    document.body.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+  return [theme, setTheme];
+};
+
 const Dashboard = ({
   onEditShow,
   onNewShow,
@@ -18,31 +33,26 @@ const Dashboard = ({
   onLogout,
   showToast,
 }) => {
-  const [showSettings, setShowSettings] = React.useState(false);
-
-  // Backward-compat shim: the Dashboard has lots of references like
-  // `downloadedVideos.size` from the legacy code. We expose a tiny shim so
-  // the existing JSX continues to read sensible values.
-  const downloadedVideos = React.useMemo(() => ({
-    size: fireworks?.length || 0,
-  }), [fireworks]);
+  const [theme, setTheme] = useTheme();
   const [searchQuery, setSearchQuery] = React.useState('');
+  const [youtubeUrl, setYoutubeUrl] = React.useState('');
   const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
   const [showYoutubePanel, setShowYoutubePanel] = React.useState(false);
-  const [youtubeUrl, setYoutubeUrl] = React.useState('');
   const [downloading, setDownloading] = React.useState([]);
   const [backendStatus, setBackendStatus] = React.useState(null);
+  const [showSettings, setShowSettings] = React.useState(false);
 
   React.useEffect(() => {
     fetch(`${API_BASE}/api/health`)
       .then((res) => res.json())
-      .then((data) => setBackendStatus(data))
+      .then(setBackendStatus)
       .catch(() => setBackendStatus({ status: 'offline' }));
   }, []);
 
+  // Poll active downloads (web client returns 403 from Render but locally
+  // works — the polling itself is harmless either way).
   React.useEffect(() => {
     if (downloading.length === 0) return;
-
     const interval = setInterval(async () => {
       const updates = await Promise.all(
         downloading.map(async (dl) => {
@@ -50,33 +60,27 @@ const Dashboard = ({
             const res = await fetch(`${API_BASE}/api/download/${dl.id}`, {
               credentials: 'include',
             });
-            const status = await res.json();
-            return { ...dl, ...status };
+            return { ...dl, ...(await res.json()) };
           } catch {
             return dl;
           }
         }),
       );
-
       setDownloading(updates.filter((dl) => dl.status === 'downloading'));
-
       updates
         .filter((dl) => dl.status === 'complete' && dl.filename)
-        .forEach((dl) => onDownloadComplete(dl));
+        .forEach(onDownloadComplete);
     }, 1000);
-
     return () => clearInterval(interval);
   }, [downloading, onDownloadComplete]);
 
   const handleYoutubeDownload = async () => {
     if (!youtubeUrl.trim()) return;
-
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
-      alert('Invalid YouTube URL. Please enter a valid YouTube video URL.');
+      showToast?.('Invalid YouTube URL', 'warning');
       return;
     }
-
     const downloadId = `dl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     setDownloading((prev) => [
       ...prev,
@@ -86,11 +90,10 @@ const Dashboard = ({
         videoId,
         status: 'downloading',
         progress: 0,
-        title: 'Starting download...',
+        title: 'Starting download…',
         serverSide: true,
       },
     ]);
-
     try {
       const res = await fetch(`${API_BASE}/api/download`, {
         method: 'POST',
@@ -99,14 +102,11 @@ const Dashboard = ({
         body: JSON.stringify({ url: youtubeUrl }),
       });
       const data = await res.json();
-
       if (data.error) {
-        alert(`Download failed: ${data.error}`);
+        showToast?.(`Download failed: ${data.error}`, 'error');
         setDownloading((prev) => prev.filter((dl) => dl.id !== downloadId));
         return;
       }
-
-      // Adopt the server's download id so polling matches.
       if (data.id && data.id !== downloadId) {
         setDownloading((prev) =>
           prev.map((dl) =>
@@ -116,22 +116,13 @@ const Dashboard = ({
           ),
         );
       }
-
-      // Some downloads complete synchronously (cache hit).
       if (data.status === 'complete') {
         setDownloading((prev) => prev.filter((dl) => dl.id !== downloadId));
-        onDownloadComplete({
-          id: downloadId,
-          videoId,
-          filename: data.filename,
-          title: data.title,
-          status: 'complete',
-          localUrl: `${API_BASE}/videos/${data.filename}`,
-        });
         setYoutubeUrl('');
+        onDownloadComplete({ ...data, id: downloadId });
       }
     } catch (err) {
-      alert(`Download failed: ${err.message}\n\nPlease check your connection and try again.`);
+      showToast?.(`Download failed: ${err.message}`, 'error');
       setDownloading((prev) => prev.filter((dl) => dl.id !== downloadId));
     }
   };
@@ -144,275 +135,300 @@ const Dashboard = ({
   );
 
   const openYoutubeSearch = () => {
-    if (youtubeSearchQuery.trim()) {
-      window.open(
-        `https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`,
-        '_blank',
-      );
-    }
+    if (!youtubeSearchQuery.trim()) return;
+    window.open(
+      `https://www.youtube.com/results?search_query=${encodeURIComponent(youtubeSearchQuery)}`,
+      '_blank',
+    );
   };
 
   const backendOk = backendStatus?.status === 'ok';
+  const fireworkCount = fireworks?.length || 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 md:mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-orange-400 mb-2">
-              🎆 Fireworks Show Planner
-            </h1>
-            <p className="text-sm md:text-base text-gray-300">
-              {currentUser
-                ? `Welcome, ${currentUser.username}!`
-                : 'Plan your perfect fireworks show'}
-            </p>
-            {/* Project switcher + settings */}
-            {projects && projects.length > 0 && (
-              <div className="mt-3 flex items-center gap-2">
-                <label className="text-xs text-gray-400">Project:</label>
-                <select
-                  value={currentProject?.id || ''}
-                  onChange={(e) => onSwitchProject?.(parseInt(e.target.value, 10))}
-                  className="bg-gray-800 border border-purple-500/40 text-white text-sm px-3 py-1 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.role !== 'editor' ? `(${p.role})` : ''}
-                    </option>
-                  ))}
-                </select>
-                {currentProject && (
-                  <button
-                    onClick={() => setShowSettings(true)}
-                    className="text-gray-400 hover:text-white p-1 rounded transition"
-                    title="Project settings"
-                    aria-label="Project settings"
-                  >
-                    ⚙️
-                  </button>
-                )}
-                <button
-                  onClick={async () => {
-                    const projName = window.prompt(
-                      'New project name (e.g. "2027 - 4th of July"):',
-                    );
-                    if (!projName?.trim()) return;
-                    const res = await fetch(`${API_BASE}/api/projects`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ name: projName.trim() }),
-                    });
-                    if (res.ok) {
-                      const proj = await res.json();
-                      onSwitchProject?.(proj.id);
-                      // The parent's checkAuth-driven refresh handles the
-                      // projects[] update on the next mount; here we trigger
-                      // a synthetic switch so the user lands in the new one.
-                      window.location.reload();
-                    }
-                  }}
-                  className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded transition"
-                  title="Create a new project"
-                >
-                  + new
-                </button>
-              </div>
-            )}
+    <div className="min-h-screen bg-bg text-text">
+      {/* Top app bar */}
+      <header className="border-b border-border bg-surface">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 mr-2">
+            <span className="text-xl">🎆</span>
+            <span className="font-semibold tracking-tight text-text">
+              Fireworks Planner
+            </span>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+
+          {/* Project switcher (compact) */}
+          {projects && projects.length > 0 && (
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-dim">project</span>
+              <select
+                value={currentProject?.id || ''}
+                onChange={(e) => onSwitchProject?.(parseInt(e.target.value, 10))}
+                className="bg-surface2 border border-border text-text text-xs px-2 py-1 rounded focus:outline-none focus:border-accent"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.role !== 'editor' ? ` · ${p.role}` : ''}
+                  </option>
+                ))}
+              </select>
+              {currentProject && (
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="text-dim hover:text-text px-1"
+                  title="Project settings"
+                >
+                  ⚙
+                </button>
+              )}
+              <button
+                onClick={async () => {
+                  const projName = window.prompt(
+                    'New project name (e.g. "2027 - 4th of July"):',
+                  );
+                  if (!projName?.trim()) return;
+                  const res = await fetch(`${API_BASE}/api/projects`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ name: projName.trim() }),
+                  });
+                  if (res.ok) {
+                    const proj = await res.json();
+                    onSwitchProject?.(proj.id);
+                    window.location.reload();
+                  }
+                }}
+                className="text-dim hover:text-text px-1"
+                title="Create a new project"
+              >
+                +
+              </button>
+            </div>
+          )}
+
+          <div className="flex-1" />
+
+          {/* Theme toggle */}
+          <button
+            onClick={() =>
+              setTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length])
+            }
+            className="text-xs text-dim hover:text-text px-2 py-1 border border-border rounded transition"
+            title="Switch theme"
+          >
+            {theme === 'ember' ? '🔥 ember' : '🌙 midnight'}
+          </button>
+
+          {/* User badge + logout */}
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-dim hidden sm:inline">
+              {currentUser?.username || ''}
+            </span>
+            <button
+              onClick={onLogout}
+              className="text-dim hover:text-text border border-border hover:border-border-strong px-2 py-1 rounded transition"
+            >
+              sign out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Hero / primary actions */}
+        <section className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-text">
+              {currentProject?.name || 'Project'}
+            </h1>
+            <p className="text-sm text-dim mt-1">
+              {savedSessions.length} {savedSessions.length === 1 ? 'show' : 'shows'}
+              {' · '}
+              {fireworkCount} {fireworkCount === 1 ? 'firework' : 'fireworks'}
+              {' · '}
+              <span
+                className={backendOk ? 'text-leaf' : 'text-ember'}
+                title={backendOk ? 'Backend connected' : 'Backend offline'}
+              >
+                ●
+              </span>{' '}
+              <span className="text-dim">
+                {backendOk ? 'connected' : 'offline'}
+              </span>
+            </p>
+          </div>
+          <div className="flex gap-2">
             <button
               onClick={onGoToLibrary}
-              className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg"
+              className="bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong text-text px-4 py-2 rounded transition text-sm"
             >
               📚 Library
             </button>
             <button
               onClick={onNewShow}
-              className="bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold text-base md:text-lg transition shadow-lg"
+              className="bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-2 rounded transition text-sm shadow"
             >
-              + New Show
-            </button>
-            <button
-              onClick={onLogout}
-              className="bg-gray-600 hover:bg-gray-700 px-4 py-3 rounded-lg font-medium text-sm md:text-base transition"
-            >
-              🚪 Logout
+              + New show
             </button>
           </div>
-        </div>
+        </section>
 
-        {/* Stats Bar */}
-        <div className="grid grid-cols-3 gap-2 md:gap-4 mb-6 md:mb-8">
-          <div
-            className="bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-purple-500/30 cursor-pointer hover:border-purple-400 transition"
-            onClick={() =>
-              sortedSessions.length > 0 &&
-              onEditShow(sortedSessions[0].name, sortedSessions[0].user_id)
-            }
-          >
-            <div className="text-3xl font-bold text-purple-400">{savedSessions.length}</div>
-            <div className="text-sm text-gray-400 mt-1">Total Shows</div>
-          </div>
-          <div
-            className="bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-blue-500/30 cursor-pointer hover:border-blue-400 transition"
-            onClick={onGoToLibrary}
-          >
-            <div className="text-3xl font-bold text-blue-400">{downloadedVideos.size}</div>
-            <div className="text-sm text-gray-400 mt-1">Fireworks in Project</div>
-          </div>
-          <div className="bg-gray-800/50 backdrop-blur rounded-lg p-4 border border-green-500/30">
-            <div
-              className={`text-3xl font-bold ${backendOk ? 'text-green-400' : 'text-red-400'}`}
-            >
-              {backendOk ? '●' : '○'}
+        {/* Two-column main content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Shows */}
+          <section className="lg:col-span-2">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs uppercase tracking-wider text-dim font-medium">
+                Shows
+              </h2>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search…"
+                className="bg-surface border border-border text-text px-3 py-1 rounded text-sm w-48 focus:outline-none focus:border-accent"
+              />
             </div>
-            <div className="text-sm text-gray-400 mt-1">
-              {backendOk ? 'Backend Connected' : 'Backend Offline'}
-            </div>
-          </div>
-        </div>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-          {/* Shows list */}
-          <div className="lg:col-span-2">
-            <div className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-purple-500/30">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold text-purple-300">🎭 Your Shows</h2>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search shows..."
-                  className="bg-gray-700/50 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 w-64"
-                />
+            {sortedSessions.length === 0 ? (
+              <div className="border border-border rounded p-10 text-center bg-surface">
+                <div className="text-4xl mb-3 opacity-60">🎆</div>
+                <p className="text-text font-medium mb-1">No shows yet</p>
+                <p className="text-sm text-dim mb-4">
+                  Start designing your show — drop fireworks on the timeline.
+                </p>
+                <button
+                  onClick={onNewShow}
+                  className="bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-2 rounded text-sm"
+                >
+                  + Create first show
+                </button>
               </div>
-
-              {sortedSessions.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="text-6xl mb-4">🎆</div>
-                  <p className="text-xl text-gray-400 mb-2">No shows yet</p>
-                  <p className="text-sm text-gray-500 mb-6">
-                    Create your first fireworks show to get started!
-                  </p>
-                  <button
-                    onClick={onNewShow}
-                    className="bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-lg font-bold transition"
-                  >
-                    + Create First Show
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                  {sortedSessions.map((session) => {
-                    const isOwn =
-                      session.user_id == null || session.user_id === currentUser?.id;
-                    const ownerLabel = isOwn
-                      ? null
-                      : session.creator_username || session.creator_email || 'unknown';
-                    return (
-                      <div
-                        key={`${session.user_id ?? 'me'}:${session.name}`}
-                        className={`bg-gray-700/50 rounded-lg p-4 hover:bg-gray-700 transition cursor-pointer border hover:border-purple-500 ${
-                          isOwn ? 'border-transparent' : 'border-yellow-500/40'
-                        }`}
-                        onClick={() => onEditShow(session.name, session.user_id)}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2 flex-wrap">
-                              <h3 className="text-xl font-bold text-white">{session.name}</h3>
-                              <span className="text-xs px-2 py-1 bg-purple-600 rounded">
-                                {`${(session.fireworks || session.videos || []).length} items`}
-                              </span>
-                              {ownerLabel && (
-                                <span
-                                  className="text-xs px-2 py-1 bg-yellow-600/40 border border-yellow-500/60 rounded text-yellow-100"
-                                  title={`Owner user_id: ${session.user_id}`}
-                                >
-                                  by {ownerLabel}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-400 mb-2">
-                              Duration: {session.totalDuration?.toFixed(0) || 60}s
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Last modified:{' '}
-                              {new Date(session.timestamp).toLocaleDateString()} at{' '}
-                              {new Date(session.timestamp).toLocaleTimeString()}
-                            </div>
-                          </div>
-                          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => onEditShow(session.name, session.user_id)}
-                              className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm transition"
-                            >
-                              ✏️ Edit
-                            </button>
-                            <button
-                              onClick={() => {
-                                const prompt = isOwn
-                                  ? `Delete show "${session.name}"?`
-                                  : `Delete ${ownerLabel}'s show "${session.name}"?`;
-                                if (confirm(prompt)) {
-                                  onDeleteShow(session.name, session.user_id);
-                                }
-                              }}
-                              className="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition"
-                            >
-                              🗑️
-                            </button>
-                          </div>
+            ) : (
+              <ul className="divide-y divide-border border border-border rounded bg-surface overflow-hidden">
+                {sortedSessions.map((session) => {
+                  const isOwn =
+                    session.user_id == null || session.user_id === currentUser?.id;
+                  const ownerLabel = isOwn
+                    ? null
+                    : session.creator_username || session.creator_email || 'unknown';
+                  const itemCount = (session.fireworks || session.videos || []).length;
+                  return (
+                    <li
+                      key={`${session.user_id ?? 'me'}:${session.name}`}
+                      className="px-4 py-3 hover:bg-surface2 transition cursor-pointer flex items-center gap-3"
+                      onClick={() => onEditShow(session.name, session.user_id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <h3 className="font-medium text-text truncate">
+                            {session.name}
+                          </h3>
+                          {ownerLabel && (
+                            <span className="text-[10px] uppercase tracking-wide text-gold border border-gold/40 px-1.5 py-0.5 rounded">
+                              by {ownerLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-dim font-mono">
+                          {itemCount} {itemCount === 1 ? 'firework' : 'fireworks'}
+                          {' · '}
+                          {Math.round(session.totalDuration || 60)}s
+                          {' · '}
+                          {new Date(session.timestamp).toLocaleDateString()}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => onEditShow(session.name, session.user_id)}
+                          className="text-xs text-dim hover:text-accent px-2 py-1"
+                          title="Edit"
+                        >
+                          edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            const prompt = isOwn
+                              ? `Delete show "${session.name}"?`
+                              : `Delete ${ownerLabel}'s show "${session.name}"?`;
+                            if (window.confirm(prompt))
+                              onDeleteShow(session.name, session.user_id);
+                          }}
+                          className="text-xs text-dim hover:text-ember px-2 py-1"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
-          {/* Right column: YouTube + Library quick-links */}
-          <div className="space-y-6">
-            <div className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-orange-500/30">
-              <h2 className="text-xl font-bold text-orange-300 mb-4">📥 YouTube Downloader</h2>
-              <div className="text-xs text-blue-400 flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 bg-blue-400 rounded-full" />
-                Server-side download via yt-dlp
+          {/* Right column */}
+          <aside className="space-y-4">
+            {/* Library quick link */}
+            <button
+              onClick={onGoToLibrary}
+              className="w-full text-left border border-border bg-surface hover:bg-surface2 hover:border-border-strong rounded p-4 transition"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="font-medium text-text">📚 Fireworks library</h2>
+                <span className="text-xs text-dim font-mono">{fireworkCount}</span>
               </div>
+              <p className="text-xs text-dim">
+                Photos, manufacturer, fuse delay, grams, price.
+              </p>
+            </button>
 
-              <div className="space-y-3">
+            {/* YouTube downloader (collapsed by default — not the primary action) */}
+            <details className="border border-border bg-surface rounded">
+              <summary className="cursor-pointer px-4 py-3 flex items-center justify-between text-sm font-medium select-none">
+                <span>📥 Quick YouTube download</span>
+                <span className="text-xs text-dim">server-side</span>
+              </summary>
+              <div className="px-4 pb-4 pt-1 space-y-2">
                 <input
                   type="text"
                   value={youtubeUrl}
                   onChange={(e) => setYoutubeUrl(e.target.value)}
-                  placeholder="Paste YouTube URL..."
-                  className="w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="https://youtube.com/…"
+                  className="w-full bg-surface2 border border-border text-text px-3 py-2 rounded text-sm focus:outline-none focus:border-accent"
                   onKeyDown={(e) => e.key === 'Enter' && handleYoutubeDownload()}
                 />
                 <button
                   onClick={handleYoutubeDownload}
                   disabled={!youtubeUrl.trim()}
-                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition font-bold"
+                  className="w-full bg-accent hover:bg-accent-strong disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed text-bg font-medium px-3 py-2 rounded text-sm"
                 >
-                  Download Video
+                  Download
                 </button>
 
                 {downloading.length > 0 && (
-                  <div className="space-y-2 mt-3">
+                  <div className="space-y-1.5 mt-2">
                     {downloading.map((dl) => (
-                      <div key={dl.id} className="bg-gray-700/50 rounded p-2">
+                      <div
+                        key={dl.id}
+                        className="bg-surface2 border border-border rounded p-2"
+                      >
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="truncate">{dl.title || 'Downloading...'}</span>
-                          <span>{`${Math.round(dl.progress || 0)}%`}</span>
+                          <span className="truncate text-dim">
+                            {dl.title || 'Downloading…'}
+                          </span>
+                          <span className="font-mono">
+                            {Math.round(dl.progress || 0)}%
+                          </span>
                         </div>
-                        <div className="h-2 bg-gray-600 rounded overflow-hidden">
+                        <div className="h-1 bg-deepstone rounded overflow-hidden">
                           <div
-                            className="h-full bg-orange-500 transition-all"
+                            className="h-full bg-accent transition-all"
                             style={{ width: `${dl.progress || 0}%` }}
                           />
                         </div>
@@ -421,67 +437,44 @@ const Dashboard = ({
                   </div>
                 )}
 
-                <div className="pt-3 border-t border-gray-700">
-                  <button
-                    onClick={() => setShowYoutubePanel(!showYoutubePanel)}
-                    className="text-sm text-blue-400 hover:text-blue-300 underline"
-                  >
-                    {showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube'}
-                  </button>
-                </div>
-
+                <button
+                  onClick={() => setShowYoutubePanel(!showYoutubePanel)}
+                  className="text-xs text-dim hover:text-text underline mt-1"
+                >
+                  {showYoutubePanel ? 'hide search' : '🔍 search YouTube'}
+                </button>
                 {showYoutubePanel && (
-                  <div className="bg-gray-900/50 rounded-lg p-3 border border-blue-500/30">
-                    <p className="text-xs text-gray-400 mb-2">Search YouTube in new tab:</p>
+                  <div className="bg-surface2 border border-border rounded p-2">
                     <input
                       type="text"
                       value={youtubeSearchQuery}
                       onChange={(e) => setYoutubeSearchQuery(e.target.value)}
-                      placeholder="e.g., fireworks display..."
-                      className="w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2"
+                      placeholder="e.g., King Cake fireworks"
+                      className="w-full bg-deepstone border border-border text-text px-2 py-1.5 rounded text-xs mb-2 focus:outline-none focus:border-accent"
                       onKeyDown={(e) => e.key === 'Enter' && openYoutubeSearch()}
                     />
                     <button
                       onClick={openYoutubeSearch}
-                      className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition"
+                      className="w-full bg-surface3 hover:bg-surface2 border border-border text-text px-2 py-1.5 rounded text-xs"
                     >
-                      🔍 Search on YouTube
+                      Search on YouTube ↗
                     </button>
                   </div>
                 )}
               </div>
-            </div>
+            </details>
 
             {currentUser?.is_admin && <AdminDesktopDownload />}
-
-            {/* Quick Library Preview */}
-            <div
-              className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-green-500/30 cursor-pointer hover:border-green-400 transition"
-              onClick={onGoToLibrary}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-bold text-green-300">📚 Fireworks Library</h2>
-                <span className="text-sm text-gray-400">{downloadedVideos.size} fireworks</span>
-              </div>
-              <p className="text-sm text-gray-400 mb-3">Manage this project's fireworks</p>
-              <button className="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition">
-                Manage Library →
-              </button>
-            </div>
-          </div>
+          </aside>
         </div>
-      </div>
+      </main>
 
       {showSettings && currentProject && (
         <ProjectSettings
           projectId={currentProject.id}
           currentUserId={currentUser?.id}
           onClose={() => setShowSettings(false)}
-          onProjectChanged={() => {
-            // After rename: trigger a global refresh so the dashboard
-            // header / dropdown pick up the new name.
-            window.location.reload();
-          }}
+          onProjectChanged={() => window.location.reload()}
           showToast={showToast}
         />
       )}
