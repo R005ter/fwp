@@ -158,12 +158,12 @@ const ProjectSettings = ({
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-purple-500/40 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-        <div className="flex items-center justify-between p-4 border-b border-gray-800">
-          <h2 className="text-xl font-bold text-purple-300">⚙️ Project settings</h2>
+      <div className="bg-surface border border-border rounded max-w-2xl w-full max-h-[90vh] overflow-y-auto elev-2">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <h2 className="font-semibold text-text">⚙️ Project settings</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none px-2"
+            className="text-dim hover:text-text text-xl leading-none px-2"
             aria-label="Close"
           >
             ×
@@ -171,14 +171,14 @@ const ProjectSettings = ({
         </div>
 
         {loading ? (
-          <div className="p-8 text-gray-400 text-center">Loading…</div>
+          <div className="p-8 text-dim text-center">Loading…</div>
         ) : error ? (
-          <div className="p-6 text-red-400">Couldn't load: {error}</div>
+          <div className="p-6 text-ember">Couldn't load: {error}</div>
         ) : (
-          <div className="p-6 space-y-6">
+          <div className="p-5 space-y-6">
             {/* Project name */}
             <div>
-              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-2">
+              <label className="block text-[11px] uppercase tracking-wider text-dim mb-2">
                 Project name
               </label>
               <div className="flex gap-2">
@@ -187,28 +187,28 @@ const ProjectSettings = ({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={!isOwner}
-                  className="flex-1 bg-gray-800 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60"
+                  className="flex-1 bg-surface2 border border-border text-text px-3 py-2 rounded text-sm focus:outline-none focus:border-accent disabled:opacity-60"
                 />
                 {isOwner && (
                   <button
                     onClick={onRename}
                     disabled={renaming || name.trim() === project?.name}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-4 py-2 rounded font-medium"
+                    className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-semibold px-4 py-2 rounded text-sm"
                   >
                     {renaming ? '…' : 'Rename'}
                   </button>
                 )}
               </div>
-              <div className="mt-1 text-xs text-gray-500">
-                Plan: <span className="text-gray-300">{project?.plan || 'free'}</span>
+              <div className="mt-1 text-xs text-muted">
+                Plan: <span className="text-dim">{project?.plan || 'free'}</span>
                 {' · '}
-                You are <span className="text-gray-300">{ROLE_LABELS[role]}</span>
+                You are <span className="text-dim">{ROLE_LABELS[role]}</span>
               </div>
             </div>
 
             {/* Members */}
             <div>
-              <h3 className="text-xs uppercase tracking-wide text-gray-400 mb-2">
+              <h3 className="text-[11px] uppercase tracking-wider text-dim mb-2">
                 Members ({members.length})
               </h3>
               <div className="space-y-1">
@@ -217,12 +217,12 @@ const ProjectSettings = ({
                   return (
                     <div
                       key={m.user_id}
-                      className="flex items-center gap-3 bg-gray-800/60 rounded px-3 py-2 text-sm"
+                      className="flex items-center gap-3 bg-surface2 border border-border rounded px-3 py-2 text-sm"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{m.username}</div>
+                        <div className="font-medium text-text truncate">{m.username}</div>
                         {m.email && (
-                          <div className="text-xs text-gray-500 truncate">{m.email}</div>
+                          <div className="text-xs text-dim font-mono truncate">{m.email}</div>
                         )}
                       </div>
                       {isOwner && !isSelf ? (
@@ -231,14 +231,14 @@ const ProjectSettings = ({
                           onChange={(e) =>
                             onChangeRole(m.user_id, m.username, e.target.value)
                           }
-                          className="bg-gray-700 text-xs px-2 py-1 rounded"
+                          className="bg-surface3 border border-border text-text text-xs px-2 py-1 rounded"
                         >
                           <option value="viewer">Viewer</option>
                           <option value="editor">Editor</option>
                           <option value="owner">Owner</option>
                         </select>
                       ) : (
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-dim">
                           {ROLE_LABELS[m.role]}
                           {isSelf && ' (you)'}
                         </span>
@@ -246,7 +246,7 @@ const ProjectSettings = ({
                       {isOwner && !isSelf && (
                         <button
                           onClick={() => onRemove(m.user_id, m.username)}
-                          className="text-xs bg-red-700/70 hover:bg-red-700 px-2 py-1 rounded"
+                          className="text-xs text-ember hover:text-ember/80 border border-ember/40 hover:border-ember px-2 py-1 rounded"
                           title="Remove from project"
                         >
                           Remove
@@ -260,8 +260,8 @@ const ProjectSettings = ({
 
             {/* Invite */}
             {isOwner && (
-              <div className="bg-gray-800/40 border border-purple-500/20 rounded p-4">
-                <h3 className="text-xs uppercase tracking-wide text-gray-400 mb-2">
+              <div className="bg-surface2 border border-border rounded p-4">
+                <h3 className="text-[11px] uppercase tracking-wider text-dim mb-2">
                   Add member
                 </h3>
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -270,12 +270,12 @@ const ProjectSettings = ({
                     value={inviteIdent}
                     onChange={(e) => setInviteIdent(e.target.value)}
                     placeholder="email or username"
-                    className="flex-1 bg-gray-800 border border-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="flex-1 bg-surface3 border border-border text-text px-3 py-2 rounded text-sm focus:outline-none focus:border-accent"
                   />
                   <select
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value)}
-                    className="bg-gray-800 border border-gray-700 px-3 py-2 rounded"
+                    className="bg-surface3 border border-border text-text px-3 py-2 rounded text-sm"
                   >
                     <option value="viewer">Viewer</option>
                     <option value="editor">Editor</option>
@@ -284,14 +284,14 @@ const ProjectSettings = ({
                   <button
                     onClick={onInvite}
                     disabled={inviting || !inviteIdent.trim()}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-4 py-2 rounded font-medium"
+                    className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-semibold px-4 py-2 rounded text-sm"
                   >
                     {inviting ? '…' : 'Add'}
                   </button>
                 </div>
-                <p className="mt-2 text-[11px] text-gray-500">
+                <p className="mt-2 text-[11px] text-muted">
                   The user must already have signed in once. Adding them here
-                  gives them immediate access; there's no email invite (yet).
+                  gives them immediate access; there's no email invite yet.
                 </p>
               </div>
             )}

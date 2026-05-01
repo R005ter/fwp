@@ -326,9 +326,11 @@ const FireworksPlanner = () => {
   };
 
   const handleBackToDashboard = () => {
-    // Project members all share editing on a project's shows; persist any
-    // outstanding edits before navigating back.
-    if (currentShowName && videos.length > 0) {
+    // Only persist if at least one video has loaded its duration. Saving while
+    // videos are still resolving would let the totalDuration recompute snap
+    // back to the 60s default and trample the stored value.
+    const hasAnyVideosLoaded = videos.some((v) => v.duration && v.duration > 0);
+    if (currentShowName && videos.length > 0 && hasAnyVideosLoaded) {
       saveShow(currentShowName, true);
     }
     setCurrentShowOwnerId(null);
@@ -641,10 +643,10 @@ const FireworksPlanner = () => {
   // ---------- Render ----------
   if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-bg text-text flex items-center justify-center">
         <div className="text-center">
-          <div className="text-4xl mb-4">🎆</div>
-          <p className="text-gray-400">Loading...</p>
+          <div className="text-4xl mb-3 opacity-70">🎆</div>
+          <p className="text-sm text-dim">Loading…</p>
         </div>
       </div>
     );
@@ -656,16 +658,16 @@ const FireworksPlanner = () => {
 
   if (projects.length === 0) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white flex items-center justify-center p-6">
-        <div className="bg-gray-800/80 rounded-lg p-8 max-w-md text-center border border-purple-500/30">
-          <div className="text-4xl mb-4">🎆</div>
-          <h2 className="text-xl font-bold mb-2">No projects yet</h2>
-          <p className="text-gray-400 mb-4">
+      <div className="min-h-screen bg-bg text-text flex items-center justify-center p-6">
+        <div className="bg-surface border border-border rounded-lg p-8 max-w-md text-center elev-1">
+          <div className="text-4xl mb-3 opacity-70">🎆</div>
+          <h2 className="text-lg font-semibold text-text mb-1">No projects yet</h2>
+          <p className="text-sm text-dim mb-5">
             You're signed in but you don't have access to any projects. Ask an
-            admin to add you to one, or create a new project below.
+            admin to add you to one, or create a new project to get started.
           </p>
           <button
-            className="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded font-bold"
+            className="bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-2 rounded text-sm w-full"
             onClick={async () => {
               const name = window.prompt('Project name (e.g. "2027 - 4th of July"):');
               if (!name?.trim()) return;
@@ -682,9 +684,12 @@ const FireworksPlanner = () => {
               }
             }}
           >
-            + Create Project
+            + Create project
           </button>
-          <button onClick={handleLogout} className="block mt-4 text-sm text-gray-400 underline w-full">
+          <button
+            onClick={handleLogout}
+            className="block mt-3 text-xs text-dim hover:text-text w-full"
+          >
             Sign out
           </button>
         </div>

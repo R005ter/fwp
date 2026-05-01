@@ -9,10 +9,10 @@ const OAUTH_ERROR_MESSAGES = {
 };
 
 const inputClasses =
-  'w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-base';
+  'w-full bg-surface2 border border-border text-text px-3 py-2.5 rounded focus:outline-none focus:border-accent text-sm';
 
 const GoogleIcon = () => (
-  <svg className="w-5 h-5" viewBox="0 0 24 24">
+  <svg className="w-4 h-4" viewBox="0 0 24 24">
     <path
       fill="#4285F4"
       d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -90,98 +90,106 @@ const LoginView = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
-      <div className="bg-gray-800/90 backdrop-blur rounded-lg p-8 w-full max-w-md border border-purple-500/30 shadow-xl">
+    <div className="min-h-screen bg-bg text-text flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        {/* Brand */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-orange-400 mb-2">🎆 Fireworks Planner</h1>
-          <p className="text-gray-300">
-            {isLogin ? 'Sign in to access your shows' : 'Create an account to get started'}
+          <div className="text-5xl mb-3">🎆</div>
+          <h1 className="text-2xl font-semibold text-text mb-1">Fireworks Planner</h1>
+          <p className="text-sm text-dim">
+            {isLogin ? 'Sign in to your shows' : 'Create an account'}
           </p>
         </div>
 
-        {error && (
-          <div className="bg-red-900/50 border border-red-600 text-red-200 px-4 py-3 rounded mb-4 text-sm">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Username</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              minLength={3}
-              className={inputClasses}
-              placeholder="Enter username"
-              autoFocus
-            />
-          </div>
-
-          {!isLogin && (
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">Email (optional)</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={inputClasses}
-                placeholder="your@email.com"
-              />
+        <div className="bg-surface border border-border rounded-lg p-6 elev-1">
+          {error && (
+            <div className="bg-ember/10 border border-ember/40 text-ember px-3 py-2 rounded mb-4 text-xs">
+              {error}
             </div>
           )}
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-2">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={isLogin ? 1 : 6}
-              className={inputClasses}
-              placeholder="Enter password"
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-dim mb-1.5">
+                Username
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                minLength={3}
+                className={inputClasses}
+                placeholder="username"
+                autoFocus
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-4 py-3 rounded-lg font-bold text-base transition ${
-              loading ? 'opacity-50' : ''
-            }`}
-          >
-            {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
-          </button>
+            {!isLogin && (
+              <div>
+                <label className="block text-[11px] uppercase tracking-wider text-dim mb-1.5">
+                  Email <span className="text-muted normal-case">(optional)</span>
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={inputClasses}
+                  placeholder="you@example.com"
+                />
+              </div>
+            )}
 
-          <div className="text-center pt-4">
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-dim mb-1.5">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={isLogin ? 1 : 6}
+                className={inputClasses}
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-2.5 rounded transition text-sm ${
+                loading ? 'opacity-60 cursor-not-allowed' : ''
+              }`}
+            >
+              {loading ? 'Please wait…' : isLogin ? 'Sign in' : 'Create account'}
+            </button>
+
             <button
               type="button"
               onClick={toggleMode}
-              className="text-purple-400 hover:text-purple-300 text-sm underline"
+              className="w-full text-center text-xs text-dim hover:text-text pt-1"
             >
               {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
             </button>
-          </div>
-        </form>
+          </form>
 
-        <div className="mt-6">
-          <div className="flex items-center mb-4">
-            <div className="flex-1 border-t border-gray-600" />
-            <span className="px-4 text-sm text-gray-400">OR</span>
-            <div className="flex-1 border-t border-gray-600" />
+          {/* Google */}
+          <div className="mt-5 pt-4 border-t border-border">
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="w-full bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong text-text px-3 py-2.5 rounded text-sm transition flex items-center justify-center gap-2"
+            >
+              <GoogleIcon />
+              <span>Continue with Google</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleGoogleLogin}
-            className="w-full bg-white hover:bg-gray-100 text-gray-800 px-4 py-3 rounded-lg font-medium text-base transition flex items-center justify-center gap-3 border border-gray-300"
-          >
-            <GoogleIcon />
-            <span>Sign in with Google</span>
-          </button>
         </div>
+
+        <p className="text-center text-[11px] text-muted mt-4">
+          For residential fireworks show creators
+        </p>
       </div>
     </div>
   );

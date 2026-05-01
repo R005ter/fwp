@@ -73,7 +73,7 @@ const PhotoUploadControl = ({ currentUrl, onUploaded, showToast }) => {
         type="button"
         onClick={onPick}
         disabled={busy}
-        className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-700 disabled:opacity-50 px-3 py-2 rounded text-sm transition"
+        className="flex-1 bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong disabled:opacity-50 text-text px-3 py-1.5 rounded text-xs transition"
       >
         {busy ? 'Uploading…' : currentUrl ? '🔁 Replace photo' : '📷 Upload photo'}
       </button>
@@ -81,7 +81,7 @@ const PhotoUploadControl = ({ currentUrl, onUploaded, showToast }) => {
         <button
           type="button"
           onClick={() => onUploaded?.('')}
-          className="bg-gray-700 hover:bg-gray-600 px-2 py-2 rounded text-sm transition"
+          className="bg-surface2 hover:bg-surface3 border border-border text-dim hover:text-ember px-2 py-1.5 rounded text-xs transition"
           title="Clear photo"
         >
           ✕
@@ -187,31 +187,31 @@ const FireworkVideoRow = ({ video, onChanged, showToast }) => {
   };
 
   const numCls =
-    'bg-gray-700 px-2 py-1 rounded text-xs w-20 focus:outline-none focus:ring-2 focus:ring-orange-500';
+    'bg-surface2 border border-border text-text px-2 py-1 rounded text-xs w-20 focus:outline-none focus:border-accent';
 
   return (
-    <div className="bg-gray-900/40 p-3 rounded">
-      <div className="flex items-start gap-4 mb-3">
+    <div className="bg-surface2 border border-border rounded p-3">
+      <div className="flex items-start gap-3 mb-3">
         <video
           src={video.url}
-          className="w-40 h-24 object-cover bg-black rounded flex-shrink-0"
+          className="w-40 h-24 object-cover bg-deepstone rounded flex-shrink-0"
           preload="metadata"
           controls
         />
         <div className="flex-1 min-w-0 text-sm">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium truncate">
+            <span className="font-medium truncate text-text">
               {video.video_title || video.filename}
             </span>
             {video.is_primary ? (
-              <span className="text-[10px] uppercase tracking-wide bg-orange-600/40 border border-orange-400/60 text-orange-100 px-2 py-0.5 rounded">
+              <span className="text-[10px] uppercase tracking-wider text-gold border border-gold/40 px-1.5 py-0.5 rounded">
                 primary
               </span>
             ) : (
               <button
                 onClick={onSetPrimary}
                 disabled={busy}
-                className="text-[10px] uppercase tracking-wide bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded"
+                className="text-[10px] uppercase tracking-wider text-dim hover:text-text border border-border hover:border-border-strong px-1.5 py-0.5 rounded"
               >
                 set as primary
               </button>
@@ -219,96 +219,98 @@ const FireworkVideoRow = ({ video, onChanged, showToast }) => {
             <select
               value={kind}
               onChange={(e) => setKind(e.target.value)}
-              className="text-xs bg-gray-700 px-2 py-0.5 rounded"
+              className="text-xs bg-surface3 border border-border text-text px-2 py-0.5 rounded"
             >
               <option value="user">user</option>
               <option value="manufacturer">manufacturer</option>
               <option value="review">review</option>
             </select>
           </div>
-          <div className="text-xs text-gray-400 truncate mt-1">{video.filename}</div>
+          <div className="text-xs text-dim font-mono truncate mt-1">
+            {video.filename}
+          </div>
         </div>
         <button
           onClick={onRemove}
           disabled={busy}
-          className="text-xs bg-red-700/70 hover:bg-red-700 px-3 py-1 rounded shrink-0"
+          className="text-xs text-ember hover:text-ember/80 border border-ember/40 hover:border-ember px-2 py-1 rounded shrink-0"
           title="Unlink this video from the firework"
         >
-          🗑️ Unlink
+          unlink
         </button>
       </div>
 
       {/* Default trim + crop */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs">
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Trim start</span>
+          <span className="text-dim w-20">Trim start</span>
           <input
             type="number" step="0.1" min="0"
             value={trimStart}
             onChange={(e) => setTrimStart(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">s</span>
+          <span className="text-muted">s</span>
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Trim end</span>
+          <span className="text-dim w-20">Trim end</span>
           <input
             type="number" step="0.1" min="0"
             value={trimEnd}
             onChange={(e) => setTrimEnd(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">s</span>
+          <span className="text-muted">s</span>
         </label>
         <div />
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Crop X</span>
+          <span className="text-dim w-20">Crop X</span>
           <input
             type="number" step="1" min="0" max="100"
             value={cropX}
             onChange={(e) => setCropX(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">%</span>
+          <span className="text-muted">%</span>
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Crop Y</span>
+          <span className="text-dim w-20">Crop Y</span>
           <input
             type="number" step="1" min="0" max="100"
             value={cropY}
             onChange={(e) => setCropY(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">%</span>
+          <span className="text-muted">%</span>
         </label>
         <div />
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Crop W</span>
+          <span className="text-dim w-20">Crop W</span>
           <input
             type="number" step="1" min="1" max="100"
             value={cropW}
             onChange={(e) => setCropW(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">%</span>
+          <span className="text-muted">%</span>
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-gray-400 w-20">Crop H</span>
+          <span className="text-dim w-20">Crop H</span>
           <input
             type="number" step="1" min="1" max="100"
             value={cropH}
             onChange={(e) => setCropH(e.target.value)}
             className={numCls}
           />
-          <span className="text-gray-500">%</span>
+          <span className="text-muted">%</span>
         </label>
         <div className="flex items-center justify-end">
           <button
             onClick={onSave}
             disabled={!dirty || busy}
-            className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-3 py-1 rounded font-medium"
+            className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-medium px-3 py-1 rounded"
           >
-            {busy ? '…' : dirty ? '💾 Save' : 'Saved'}
+            {busy ? '…' : dirty ? 'Save' : 'Saved'}
           </button>
         </div>
       </div>
@@ -442,22 +444,22 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 text-white flex items-center justify-center">
-        <div className="text-center text-gray-400">Loading firework…</div>
+      <div className="min-h-screen bg-bg text-text flex items-center justify-center">
+        <div className="text-center text-dim">Loading firework…</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-8">
+      <div className="min-h-screen bg-bg text-text p-8">
         <button
           onClick={onBack}
-          className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded mb-4"
+          className="text-dim hover:text-text border border-border hover:border-border-strong px-3 py-1 rounded text-sm transition mb-4"
         >
           ← Back
         </button>
-        <p className="text-red-400">Couldn't load firework: {error}</p>
+        <p className="text-ember">Couldn't load firework: {error}</p>
       </div>
     );
   }
@@ -465,32 +467,37 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
   const hasPhoto = boxPhotoUrl?.trim().length > 0;
   const primaryVideo = (original?.videos || []).find((v) => v.is_primary);
 
+  const inputCls =
+    'w-full bg-surface2 border border-border text-text px-3 py-2 rounded focus:outline-none focus:border-accent text-sm';
+  const labelCls =
+    'block text-[11px] uppercase tracking-wider text-dim mb-1.5';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 text-white p-6">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+    <div className="min-h-screen bg-bg text-text">
+      {/* Top bar */}
+      <header className="border-b border-border bg-surface sticky top-0 z-30">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <button
             onClick={onBack}
-            className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition"
+            className="text-dim hover:text-text border border-border hover:border-border-strong px-3 py-1 rounded text-xs transition"
           >
-            ← Back to library
+            ← back to library
           </button>
-          <div className="flex gap-2">
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 px-6 py-2 rounded font-bold transition"
-            >
-              {saving ? 'Saving…' : '💾 Save'}
-            </button>
-          </div>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-semibold px-5 py-2 rounded text-sm"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         </div>
+      </header>
 
+      <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
         {/* Top — photo + name + manufacturer */}
-        <div className="bg-gray-800/60 rounded-lg border border-green-500/30 p-6 mb-4 flex flex-col md:flex-row gap-6">
-          <div className="md:w-64 flex-shrink-0">
-            <div className="aspect-square bg-black rounded overflow-hidden border border-gray-700">
+        <section className="bg-surface border border-border rounded p-5 flex flex-col md:flex-row gap-5">
+          <div className="md:w-56 flex-shrink-0">
+            <div className="aspect-square bg-deepstone rounded overflow-hidden border border-border">
               {hasPhoto ? (
                 <img
                   src={boxPhotoUrl}
@@ -508,7 +515,7 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
                   className="w-full h-full"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-600 text-sm">
+                <div className="w-full h-full flex items-center justify-center text-muted text-sm">
                   No photo or video
                 </div>
               )}
@@ -518,7 +525,7 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
               value={boxPhotoUrl}
               onChange={(e) => setBoxPhotoUrl(e.target.value)}
               placeholder="Box photo URL (optional)"
-              className="mt-2 w-full bg-gray-700 px-3 py-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="mt-2 w-full bg-surface2 border border-border text-text px-2 py-1.5 rounded text-xs focus:outline-none focus:border-accent"
             />
             <PhotoUploadControl
               currentUrl={boxPhotoUrl}
@@ -529,123 +536,109 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
 
           <div className="flex-1 space-y-3">
             <div>
-              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">
-                Name
-              </label>
+              <label className={labelCls}>Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-gray-700 text-white text-2xl font-bold px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full bg-surface2 border border-border text-text text-xl font-semibold px-3 py-2 rounded focus:outline-none focus:border-accent"
                 placeholder="King Cake"
               />
             </div>
             <div>
-              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">
-                Manufacturer
-              </label>
+              <label className={labelCls}>Manufacturer</label>
               <input
                 type="text"
                 value={manufacturer}
                 onChange={(e) => setManufacturer(e.target.value)}
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                className={inputCls}
                 placeholder="Winda Fireworks"
               />
             </div>
             <div>
-              <label className="block text-xs uppercase tracking-wide text-gray-400 mb-1">
-                Description
-              </label>
+              <label className={labelCls}>Description</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={2}
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+                className={inputCls}
                 placeholder="500-gram zipper cake with crackling tail and silver palms…"
               />
             </div>
           </div>
-        </div>
+        </section>
 
         {/* Spec grid */}
-        <div className="bg-gray-800/60 rounded-lg border border-purple-500/30 p-6 mb-4">
-          <h2 className="text-sm uppercase tracking-wide text-purple-300 font-bold mb-4">
+        <section className="bg-surface border border-border rounded p-5">
+          <h2 className="text-[11px] uppercase tracking-wider text-dim font-medium mb-4">
             Specs
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Shot count</label>
+              <label className={labelCls}>Shot count</label>
               <input
                 type="number"
                 value={shotCount}
                 onChange={(e) => setShotCount(e.target.value)}
                 min="0"
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
                 placeholder="16"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Powder grams</label>
+              <label className={labelCls}>Powder grams</label>
               <input
                 type="number"
                 value={grams}
                 onChange={(e) => setGrams(e.target.value)}
                 min="0"
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
                 placeholder="500"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Price (USD)</label>
+              <label className={labelCls}>Price (USD)</label>
               <input
                 type="text"
                 inputMode="decimal"
                 value={priceDollars}
                 onChange={(e) => setPriceDollars(e.target.value)}
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
                 placeholder="49.99"
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">
-                Fuse delay (sec)
-              </label>
+              <label className={labelCls}>Fuse delay (sec)</label>
               <input
                 type="number"
                 value={fuseDelay}
                 onChange={(e) => setFuseDelay(e.target.value)}
                 step="0.1"
                 min="0"
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
                 placeholder="3.5"
               />
-              <p className="text-[10px] text-gray-500 mt-1">
-                Light → first effect
-              </p>
+              <p className="text-[10px] text-muted mt-1">Light → first effect</p>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">
-                Effect duration (sec)
-              </label>
+              <label className={labelCls}>Effect duration (sec)</label>
               <input
                 type="number"
                 value={effectDuration}
                 onChange={(e) => setEffectDuration(e.target.value)}
                 step="0.1"
                 min="0"
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
                 placeholder="35"
               />
-              <p className="text-[10px] text-gray-500 mt-1">
-                First effect → last
-              </p>
+              <p className="text-[10px] text-muted mt-1">First effect → last</p>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Visibility</label>
+              <label className={labelCls}>Visibility</label>
               <select
                 value={visibility}
                 onChange={(e) => setVisibility(e.target.value)}
-                className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={inputCls}
               >
                 <option value="project">Project-only</option>
                 <option value="private">Private</option>
@@ -657,28 +650,25 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
           </div>
 
           <div className="mt-4">
-            <label className="block text-xs text-gray-400 mb-1">
-              Where to buy (URL)
-            </label>
+            <label className={labelCls}>Where to buy (URL)</label>
             <input
               type="text"
               value={sourceUrl}
               onChange={(e) => setSourceUrl(e.target.value)}
-              className="w-full bg-gray-700 px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className={inputCls}
               placeholder="https://…"
             />
           </div>
-        </div>
+        </section>
 
         {/* JSONB metadata */}
-        <div className="bg-gray-800/60 rounded-lg border border-blue-500/30 p-6 mb-4">
-          <h2 className="text-sm uppercase tracking-wide text-blue-300 font-bold mb-2">
-            Extra metadata <span className="text-gray-500 font-normal">(JSON)</span>
+        <section className="bg-surface border border-border rounded p-5">
+          <h2 className="text-[11px] uppercase tracking-wider text-dim font-medium mb-1">
+            Extra metadata <span className="text-muted normal-case">(JSON)</span>
           </h2>
-          <p className="text-xs text-gray-400 mb-3">
-            For fields the app doesn't have first-class columns for yet —
-            scraped manufacturer specs, color tags, fuse type, etc. Stored as
-            JSONB; queryable later.
+          <p className="text-xs text-dim mb-3">
+            For fields without a first-class column yet — scraped specs, color
+            tags, fuse type, etc. Stored as JSONB; queryable later.
           </p>
           <textarea
             value={metaText}
@@ -688,23 +678,23 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
             }}
             rows={6}
             spellCheck={false}
-            className={`w-full bg-gray-900 text-gray-100 px-3 py-2 rounded font-mono text-xs focus:outline-none focus:ring-2 ${
-              metaError ? 'ring-2 ring-red-500' : 'focus:ring-blue-500'
+            className={`w-full bg-deepstone border text-text px-3 py-2 rounded font-mono text-xs focus:outline-none ${
+              metaError
+                ? 'border-ember focus:border-ember'
+                : 'border-border focus:border-accent'
             }`}
             placeholder='{"colors": ["red","gold"], "fuse_type": "visco"}'
           />
-          {metaError && (
-            <p className="text-xs text-red-400 mt-1">⚠ {metaError}</p>
-          )}
-        </div>
+          {metaError && <p className="text-xs text-ember mt-1">⚠ {metaError}</p>}
+        </section>
 
         {/* Videos */}
-        <div className="bg-gray-800/60 rounded-lg border border-orange-500/30 p-6 mb-4">
-          <h2 className="text-sm uppercase tracking-wide text-orange-300 font-bold mb-3">
+        <section className="bg-surface border border-border rounded p-5">
+          <h2 className="text-[11px] uppercase tracking-wider text-dim font-medium mb-3">
             Videos
           </h2>
           {(original?.videos || []).length === 0 ? (
-            <p className="text-gray-500 text-sm">
+            <p className="text-muted text-sm">
               No videos linked. Use the desktop downloader to add one.
             </p>
           ) : (
@@ -728,13 +718,13 @@ const FireworkEditor = ({ fireworkId, onBack, onSaved, showToast }) => {
               ))}
             </div>
           )}
-          <p className="text-[11px] text-gray-500 mt-3">
+          <p className="text-[11px] text-muted mt-3">
             Adding alternate videos to an existing firework — coming in a
             follow-up. For now the desktop downloader creates a fresh firework
             per upload.
           </p>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 };

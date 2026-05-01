@@ -585,7 +585,7 @@ const ShowEditor = ({
     return (
       <div
         key={video.id}
-        className="relative bg-black rounded-lg overflow-hidden border-2 transition-colors flex items-center justify-center w-full"
+        className="relative bg-deepstone rounded overflow-hidden border-2 transition-colors flex items-center justify-center w-full"
         style={cellStyle}
       >
         {video.url ? (
@@ -640,7 +640,7 @@ const ShowEditor = ({
         </div>
         <button
           onClick={() => removeVideo(video.id)}
-          className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 w-6 h-6 rounded flex items-center justify-center text-sm"
+          className="absolute top-2 right-2 bg-ember/80 hover:bg-ember text-bg w-6 h-6 rounded flex items-center justify-center text-sm"
         >
           ×
         </button>
@@ -663,7 +663,7 @@ const ShowEditor = ({
                 trimCropAsLibraryDefaults(video),
               );
             }}
-            className="absolute top-2 right-10 bg-blue-600/80 hover:bg-blue-500 text-blue-50 px-2 py-1 rounded text-xs font-medium border border-blue-400/50"
+            className="absolute top-2 right-10 bg-accent/80 hover:bg-accent text-bg px-2 py-1 rounded text-xs font-medium border border-accent"
             title="Push these trim/crop settings back to the firework's defaults"
           >
             💾 → Default
@@ -677,7 +677,7 @@ const ShowEditor = ({
               type="number"
               value={video.offset.toFixed(1)}
               onChange={(e) => updateOffset(video.id, e.target.value)}
-              className="w-16 md:w-14 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded"
+              className="w-16 md:w-14 bg-deepstone border border-border text-text text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded focus:outline-none focus:border-accent"
               step="0.1"
               min="0"
             />
@@ -689,7 +689,7 @@ const ShowEditor = ({
               type="number"
               value={trimStart.toFixed(1)}
               onChange={(e) => updateTrimStart(video.id, e.target.value)}
-              className="w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded"
+              className="w-14 md:w-12 bg-deepstone border border-border text-text text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded focus:outline-none focus:border-accent"
               step="0.1"
               min="0"
             />
@@ -698,7 +698,7 @@ const ShowEditor = ({
               type="number"
               value={trimEnd.toFixed(1)}
               onChange={(e) => updateTrimEnd(video.id, e.target.value)}
-              className="w-14 md:w-12 bg-gray-800 text-white text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded"
+              className="w-14 md:w-12 bg-deepstone border border-border text-text text-sm md:text-xs px-2 md:px-1 py-2 md:py-0.5 rounded focus:outline-none focus:border-accent"
               step="0.1"
               min="0"
             />
@@ -805,44 +805,41 @@ const ShowEditor = ({
 
   try {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-2 md:p-4 flex flex-col">
+      <div className="min-h-screen bg-bg text-text p-2 md:p-4 flex flex-col">
         {isPortrait && (
-          <div className="bg-yellow-600 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center">
-            📱 Tip: Rotate to landscape for the best editing experience!
+          <div className="bg-gold/15 border border-gold/40 text-gold px-4 py-2 mb-3 rounded text-xs text-center">
+            📱 Rotate to landscape for the best editing experience.
           </div>
         )}
 
         {isReadOnly && (
-          <div className="bg-yellow-900/40 border border-yellow-500/50 text-yellow-100 px-4 py-3 mb-4 rounded-lg text-sm text-center">
+          <div className="bg-gold/10 border border-gold/30 text-text px-4 py-2 mb-3 rounded text-xs text-center">
             👀 Viewing {ownerLabel ? `${ownerLabel}'s` : "another user's"} show.
-            Changes won't be saved unless you click <strong>Save As</strong> to fork it under
-            your account.
+            Changes won't be saved unless you click <strong>Save As</strong> to fork it.
           </div>
         )}
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 gap-2">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-3 gap-2">
           <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
             <button
               onClick={onBack}
-              className="bg-gray-700 hover:bg-gray-600 px-4 py-3 md:py-2 rounded transition text-base md:text-sm"
+              className="text-dim hover:text-text border border-border hover:border-border-strong px-3 py-1.5 rounded text-xs transition"
             >
-              ← Back to Dashboard
+              ← back to dashboard
             </button>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold text-orange-400">
-                {showName ? `Editing: ${showName}` : 'New Show'}
-              </h1>
-            </div>
+            <h1 className="text-lg md:text-xl font-semibold text-text">
+              {showName || 'New show'}
+            </h1>
           </div>
           <div className="flex flex-wrap gap-2">
             {!isMobile && (
               <button
                 onClick={() => setShowYoutubeDownload(!showYoutubeDownload)}
-                className={`px-4 py-3 md:py-2 rounded transition text-base md:text-sm ${
+                className={`px-3 py-1.5 rounded text-sm transition ${
                   showYoutubeDownload
-                    ? 'bg-orange-600 border-2 border-orange-400'
-                    : 'bg-orange-500 hover:bg-orange-600'
+                    ? 'bg-accent-soft border border-accent text-accent'
+                    : 'bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong text-text'
                 }`}
               >
                 📥 YouTube
@@ -850,23 +847,23 @@ const ShowEditor = ({
             )}
             <button
               onClick={() => setShowLibraryAdd(!showLibraryAdd)}
-              className="bg-green-600 hover:bg-green-700 px-4 py-3 md:py-2 rounded transition text-base md:text-sm"
+              className="bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong text-text px-3 py-1.5 rounded text-sm transition"
             >
-              + Add from Library
+              + Add from library
             </button>
             {showName && !isReadOnly ? (
               <button
                 onClick={handleSave}
-                className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold"
+                className="bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-1.5 rounded text-sm"
               >
-                💾 Save
+                Save
               </button>
             ) : (
               <button
                 onClick={() => setShowSaveAs(true)}
-                className="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded transition font-bold"
+                className="bg-accent hover:bg-accent-strong text-bg font-semibold px-4 py-1.5 rounded text-sm"
               >
-                💾 Save As…
+                Save as…
               </button>
             )}
           </div>
@@ -874,34 +871,34 @@ const ShowEditor = ({
 
         {/* Save As Dialog */}
         {showSaveAs && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-              <h3 className="text-xl font-bold mb-4">Save Show As</h3>
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-surface border border-border rounded p-5 max-w-md w-full elev-2">
+              <h3 className="font-semibold mb-3 text-text">Save show as</h3>
               <input
                 type="text"
                 value={saveAsName}
                 onChange={(e) => setSaveAsName(e.target.value)}
-                placeholder="Enter show name..."
-                className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4"
+                placeholder="Show name…"
+                className="w-full bg-surface2 border border-border text-text px-3 py-2 rounded text-sm focus:outline-none focus:border-accent mb-3"
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveAs()}
                 autoFocus
               />
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSaveAs}
-                  disabled={!saveAsName.trim()}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 px-4 py-2 rounded transition"
-                >
-                  Save
-                </button>
+              <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => {
                     setShowSaveAs(false);
                     setSaveAsName('');
                   }}
-                  className="flex-1 bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded transition"
+                  className="text-dim hover:text-text px-3 py-1.5 text-sm"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={handleSaveAs}
+                  disabled={!saveAsName.trim()}
+                  className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-semibold px-4 py-1.5 rounded text-sm"
+                >
+                  Save
                 </button>
               </div>
             </div>
@@ -910,27 +907,27 @@ const ShowEditor = ({
 
         {/* YouTube Download Dialog */}
         {showYoutubeDownload && !isMobile && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4">
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-surface border border-border rounded p-5 max-w-2xl w-full elev-2">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-orange-300">📥 Download from YouTube</h3>
+                <h3 className="font-semibold text-text">📥 Download from YouTube</h3>
                 <button
                   onClick={() => setShowYoutubeDownload(false)}
-                  className="bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded"
+                  className="text-dim hover:text-text text-xl leading-none"
                 >
-                  ✕
+                  ×
                 </button>
               </div>
 
               {backendStatus?.status === 'ok' ? (
-                <div className="text-xs text-green-400 flex items-center gap-2 mb-3">
-                  <span className="w-2 h-2 bg-green-400 rounded-full" />
+                <div className="text-xs text-leaf flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 bg-leaf rounded-full" />
                   {`Connected • yt-dlp ${backendStatus.ytdlp_version}`}
                 </div>
               ) : (
-                <div className="text-xs text-red-400 flex items-center gap-2 mb-3">
-                  <span className="w-2 h-2 bg-red-400 rounded-full" />
-                  Backend offline - start server.py
+                <div className="text-xs text-ember flex items-center gap-2 mb-3">
+                  <span className="w-2 h-2 bg-ember rounded-full" />
+                  Backend offline
                 </div>
               )}
 
@@ -940,30 +937,37 @@ const ShowEditor = ({
                     type="text"
                     value={youtubeUrl}
                     onChange={(e) => setYoutubeUrl(e.target.value)}
-                    placeholder="Paste YouTube URL..."
-                    className="flex-1 bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="https://youtube.com/…"
+                    className="flex-1 bg-surface2 border border-border text-text px-3 py-2 rounded text-sm focus:outline-none focus:border-accent"
                     onKeyDown={(e) => e.key === 'Enter' && handleYoutubeDownload()}
                   />
                   <button
                     onClick={handleYoutubeDownload}
                     disabled={!youtubeUrl.trim() || backendStatus?.status !== 'ok'}
-                    className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-2 rounded-lg transition font-bold"
+                    className="bg-accent hover:bg-accent-strong disabled:bg-surface3 disabled:text-muted disabled:cursor-not-allowed text-bg font-semibold px-4 py-2 rounded text-sm"
                   >
                     Download
                   </button>
                 </div>
 
                 {downloading.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {downloading.map((dl) => (
-                      <div key={dl.id} className="bg-gray-700/50 rounded p-2">
+                      <div
+                        key={dl.id}
+                        className="bg-surface2 border border-border rounded p-2"
+                      >
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="truncate">{dl.title || 'Downloading...'}</span>
-                          <span>{`${Math.round(dl.progress || 0)}%`}</span>
+                          <span className="truncate text-dim">
+                            {dl.title || 'Downloading…'}
+                          </span>
+                          <span className="font-mono">
+                            {Math.round(dl.progress || 0)}%
+                          </span>
                         </div>
-                        <div className="h-2 bg-gray-600 rounded overflow-hidden">
+                        <div className="h-1 bg-deepstone rounded overflow-hidden">
                           <div
-                            className="h-full bg-orange-500 transition-all"
+                            className="h-full bg-accent transition-all"
                             style={{ width: `${dl.progress || 0}%` }}
                           />
                         </div>
@@ -972,31 +976,33 @@ const ShowEditor = ({
                   </div>
                 )}
 
-                <div className="pt-3 border-t border-gray-700">
+                <div className="pt-2 border-t border-border">
                   <button
                     onClick={() => setShowYoutubePanel(!showYoutubePanel)}
-                    className="text-sm text-blue-400 hover:text-blue-300 underline"
+                    className="text-xs text-dim hover:text-text underline"
                   >
-                    {showYoutubePanel ? '↑ Hide YouTube Search' : '🔍 Search YouTube'}
+                    {showYoutubePanel ? 'hide search' : '🔍 search YouTube'}
                   </button>
                 </div>
 
                 {showYoutubePanel && (
-                  <div className="bg-gray-900/50 rounded-lg p-3 border border-blue-500/30">
-                    <p className="text-xs text-gray-400 mb-2">Search YouTube in new tab:</p>
+                  <div className="bg-surface2 border border-border rounded p-2.5">
+                    <p className="text-[11px] text-dim mb-2">
+                      Search YouTube in a new tab:
+                    </p>
                     <input
                       type="text"
                       value={youtubeSearchQuery}
                       onChange={(e) => setYoutubeSearchQuery(e.target.value)}
-                      placeholder="e.g., fireworks display..."
-                      className="w-full bg-gray-700/50 text-white px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm mb-2"
+                      placeholder="e.g., fireworks display"
+                      className="w-full bg-deepstone border border-border text-text px-2 py-1.5 rounded text-xs mb-2 focus:outline-none focus:border-accent"
                       onKeyDown={(e) => e.key === 'Enter' && openYoutubeSearch()}
                     />
                     <button
                       onClick={openYoutubeSearch}
-                      className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg text-sm transition"
+                      className="w-full bg-surface3 hover:bg-surface2 border border-border text-text px-2 py-1.5 rounded text-xs"
                     >
-                      🔍 Search on YouTube
+                      Search on YouTube ↗
                     </button>
                   </div>
                 )}
@@ -1007,27 +1013,27 @@ const ShowEditor = ({
 
         {/* Add from Library Dialog */}
         {showLibraryAdd && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold">📚 Add from Library</h3>
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <div className="bg-surface border border-border rounded p-5 max-w-2xl w-full max-h-[85vh] flex flex-col elev-2">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h3 className="font-semibold text-text">📚 Add from library</h3>
                 <button
                   onClick={() => setShowLibraryAdd(false)}
-                  className="bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded"
+                  className="text-dim hover:text-text text-xl leading-none"
                 >
-                  ✕
+                  ×
                 </button>
               </div>
               {!fireworks || fireworks.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">
-                  No fireworks in this project's library yet.
+                <p className="text-muted text-center py-8 text-sm">
+                  No fireworks in this project yet.
                 </p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5 overflow-y-auto">
                   {fireworks.map((fw) => (
                     <div
                       key={fw.id}
-                      className="bg-gray-700 rounded p-3 hover:bg-gray-600 transition cursor-pointer flex items-center gap-3"
+                      className="bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong rounded p-2.5 transition cursor-pointer flex items-center gap-3"
                       onClick={() => {
                         onAddFromLibrary(fw);
                         setShowLibraryAdd(false);
@@ -1036,21 +1042,24 @@ const ShowEditor = ({
                       {fw.primary_url && (
                         <video
                           src={fw.primary_url}
-                          className="w-20 h-12 object-cover rounded bg-black flex-shrink-0"
+                          className="w-20 h-12 object-cover rounded bg-deepstone flex-shrink-0"
                           muted
                           preload="metadata"
                         />
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{fw.name}</div>
-                        <div className="flex flex-wrap gap-1 text-[10px] text-gray-400 mt-0.5">
+                        <div className="font-medium text-sm text-text truncate">
+                          {fw.name}
+                        </div>
+                        <div className="flex flex-wrap gap-1 text-[10px] text-dim font-mono mt-0.5">
                           {fw.manufacturer && <span>{fw.manufacturer}</span>}
-                          {fw.shot_count != null && <span>· {fw.shot_count} shots</span>}
+                          {fw.shot_count != null && <span>· {fw.shot_count} sh</span>}
                           {fw.grams != null && <span>· {fw.grams}g</span>}
                         </div>
                         {(fw.default_trim_start > 0 || fw.default_trim_end > 0) && (
-                          <div className="text-xs text-yellow-400 mt-1">
-                            {`Default trim: ${(fw.default_trim_start || 0).toFixed(1)}s – ${(fw.default_trim_end || 0).toFixed(1)}s`}
+                          <div className="text-[10px] text-gold mt-1 font-mono">
+                            trim {(fw.default_trim_start || 0).toFixed(1)}s –{' '}
+                            {(fw.default_trim_end || 0).toFixed(1)}s
                           </div>
                         )}
                       </div>
@@ -1072,7 +1081,7 @@ const ShowEditor = ({
             </h2>
           </div>
           <div
-            className="gap-2 bg-gray-900 rounded-lg p-2 flex items-center justify-center"
+            className="gap-2 bg-deepstone border border-border rounded p-2 flex items-center justify-center"
             style={{
               minHeight: '200px',
               display: 'grid',
@@ -1099,46 +1108,46 @@ const ShowEditor = ({
         </div>
 
         {/* Transport Controls */}
-        <div className="bg-gray-800 rounded-lg p-4 mb-4">
-          <div className="flex items-center justify-center gap-4 mb-4">
+        <div className="bg-surface border border-border rounded p-3 mb-4">
+          <div className="flex items-center justify-center gap-3 mb-3">
             <button
               onClick={() => setMasterTime(0)}
-              className="bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm"
+              className="bg-surface2 hover:bg-surface3 border border-border text-text px-3 py-1.5 rounded text-sm"
             >
               ⏮ Reset
             </button>
             <button
               onClick={() => setMasterTime((prev) => Math.max(0, prev - 1))}
-              className="bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm"
+              className="bg-surface2 hover:bg-surface3 border border-border text-text px-3 py-1.5 rounded text-sm"
             >
-              -1s
+              −1s
             </button>
             <button
               onClick={() => {
                 if (!canStartPlayback && !isPlaying) {
-                  showToast('Videos are still loading. Please wait...', 'warning');
+                  showToast('Videos are still loading. Please wait…', 'warning');
                   return;
                 }
                 setIsPlaying(!isPlaying);
               }}
               disabled={!canStartPlayback && !isPlaying}
-              className={`px-6 py-3 md:py-2 rounded font-bold text-base md:text-sm ${
+              className={`px-6 py-1.5 rounded font-semibold text-sm ${
                 !canStartPlayback && !isPlaying
-                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  ? 'bg-surface3 text-muted cursor-not-allowed'
                   : isPlaying
-                    ? 'bg-red-600 hover:bg-red-700'
-                    : 'bg-green-600 hover:bg-green-700'
+                    ? 'bg-ember hover:bg-ember/80 text-bg'
+                    : 'bg-accent hover:bg-accent-strong text-bg'
               }`}
             >
               {playButtonText}
             </button>
             <button
               onClick={() => setMasterTime((prev) => Math.min(totalDuration, prev + 1))}
-              className="bg-gray-700 hover:bg-gray-600 px-3 py-3 md:py-2 rounded text-base md:text-sm"
+              className="bg-surface2 hover:bg-surface3 border border-border text-text px-3 py-1.5 rounded text-sm"
             >
               +1s
             </button>
-            <div className="text-xl font-mono ml-4">
+            <div className="text-base font-mono ml-3 text-text">
               {`${formatTime(masterTime)} / ${formatTime(totalDuration)}`}
             </div>
           </div>
@@ -1149,30 +1158,32 @@ const ShowEditor = ({
             step="0.1"
             value={masterTime}
             onChange={(e) => setMasterTime(parseFloat(e.target.value))}
-            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
+            className="w-full h-2 bg-surface2 rounded appearance-none cursor-pointer accent-accent"
           />
         </div>
 
         {/* Timeline */}
-        <div className="bg-gray-800 rounded-lg p-4">
+        <div className="bg-surface border border-border rounded p-3">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold">Timeline</h2>
+            <h2 className="text-[11px] uppercase tracking-wider text-dim font-medium">
+              Timeline
+            </h2>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Duration:</span>
+                <span className="text-xs text-dim">Duration</span>
                 <input
                   type="number"
                   value={totalDuration}
                   onChange={(e) =>
                     setTotalDuration(Math.max(10, parseFloat(e.target.value) || 60))
                   }
-                  className="w-16 bg-gray-700 text-white text-sm px-2 py-1 rounded"
+                  className="w-16 bg-surface2 border border-border text-text text-xs px-2 py-1 rounded focus:outline-none focus:border-accent"
                   min="10"
                 />
-                <span className="text-sm">sec</span>
+                <span className="text-xs text-muted">sec</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400 whitespace-nowrap">Zoom:</span>
+                <span className="text-xs text-dim whitespace-nowrap">Zoom</span>
                 <input
                   type="range"
                   min="0.5"
@@ -1180,9 +1191,9 @@ const ShowEditor = ({
                   step="0.1"
                   value={zoom}
                   onChange={(e) => setZoom(parseFloat(e.target.value))}
-                  className="w-24 md:w-32"
+                  className="w-24 md:w-32 accent-accent"
                 />
-                <span className="text-sm text-gray-300 whitespace-nowrap w-10">
+                <span className="text-xs text-dim font-mono whitespace-nowrap w-10">
                   {`${zoom.toFixed(1)}x`}
                 </span>
               </div>
@@ -1193,7 +1204,7 @@ const ShowEditor = ({
             {Array.from({ length: Math.ceil(totalDuration / 5) + 1 }, (_, i) => (
               <div
                 key={i}
-                className="absolute text-xs text-gray-500"
+                className="absolute text-[10px] text-muted font-mono"
                 style={{ left: `${((i * 5) / totalDuration) * 100 * zoom}%` }}
               >
                 {`${i * 5}s`}
@@ -1203,7 +1214,7 @@ const ShowEditor = ({
 
           <div
             ref={timelineRef}
-            className="relative bg-gray-900 rounded overflow-x-auto cursor-pointer touch-pan-x"
+            className="relative bg-deepstone border border-border rounded overflow-x-auto cursor-pointer touch-pan-x"
             style={{ minHeight: Math.max(100, videos.length * 50 + 20) }}
             onClick={handleTimelineClick}
             onTouchStart={(e) => {
@@ -1219,15 +1230,17 @@ const ShowEditor = ({
             {videos.map(renderTimelineClip)}
           </div>
 
-          <p className="text-xs text-gray-500 mt-2">
-            Drag clips to adjust timing • Click timeline to seek
+          <p className="text-[11px] text-muted mt-2">
+            Drag clips to adjust timing · click timeline to seek
           </p>
         </div>
 
         {/* Cue Sheet */}
         {videos.length > 0 && (
-          <div className="mt-4 bg-gray-800 rounded-lg p-4">
-            <h3 className="font-semibold mb-2">Show Timing Cue Sheet</h3>
+          <div className="mt-4 bg-surface border border-border rounded p-3">
+            <h3 className="text-[11px] uppercase tracking-wider text-dim font-medium mb-2">
+              Show timing cue sheet
+            </h3>
             <div className="grid gap-1 text-sm font-mono">
               {[...videos]
                 .sort((a, b) => a.offset - b.offset)
@@ -1236,11 +1249,11 @@ const ShowEditor = ({
                   const trimEnd = video.trimEnd || 0;
                   const trimmedDuration = (video.duration || 0) - trimStart - trimEnd;
                   return (
-                    <div key={video.id} className="flex gap-2">
+                    <div key={video.id} className="flex gap-2 items-baseline">
                       <span style={{ color: video.color }}>●</span>
-                      <span className="text-gray-400 w-16">{formatTime(video.offset)}</span>
-                      <span>{video.name}</span>
-                      <span className="text-gray-500">
+                      <span className="text-dim w-16">{formatTime(video.offset)}</span>
+                      <span className="text-text">{video.name}</span>
+                      <span className="text-muted">
                         {`(${(trimmedDuration || 0).toFixed(1)}s)`}
                       </span>
                     </div>
@@ -1254,9 +1267,9 @@ const ShowEditor = ({
   } catch (err) {
     console.error('Error rendering ShowEditor:', err);
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-4">
-        <h1 className="text-red-500 text-xl mb-4">Error in Show Editor</h1>
-        <pre className="bg-gray-800 p-4 rounded overflow-auto">
+      <div className="min-h-screen bg-bg text-text p-4">
+        <h1 className="text-ember font-semibold mb-4">Error in show editor</h1>
+        <pre className="bg-surface border border-border p-4 rounded overflow-auto text-xs font-mono">
           {err.message + '\n' + err.stack}
         </pre>
       </div>

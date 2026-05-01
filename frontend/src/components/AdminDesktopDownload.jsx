@@ -8,11 +8,9 @@ const PLATFORM_ICON = {
 };
 
 /**
- * Admin-only widget on the Dashboard right column. Lists per-OS download links
- * for the desktop "add a YouTube video" mini-app. URLs come from the backend's
- * /api/desktop/releases endpoint, which points at GitHub Releases for the
- * configured repo. If CI hasn't published a release yet, the GitHub link will
- * 404 — the admin clicks through and sees that explicitly.
+ * Admin-only widget on the Dashboard right column. Lists per-OS download
+ * links for the desktop "add a YouTube video" mini-app. URLs come from
+ * the backend's /api/desktop/releases endpoint (latest GitHub Release).
  */
 const AdminDesktopDownload = () => {
   const [data, setData] = React.useState(null);
@@ -37,64 +35,68 @@ const AdminDesktopDownload = () => {
 
   if (loading) {
     return (
-      <div className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-yellow-500/30">
-        <h2 className="text-xl font-bold text-yellow-300 mb-2">🖥️ Desktop App</h2>
-        <p className="text-sm text-gray-400">Loading releases…</p>
+      <div className="border border-border bg-surface rounded p-4">
+        <h2 className="font-medium text-text mb-1">🖥️ Desktop app</h2>
+        <p className="text-xs text-dim">Loading releases…</p>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-yellow-500/30">
-        <h2 className="text-xl font-bold text-yellow-300 mb-2">🖥️ Desktop App</h2>
-        <p className="text-sm text-red-300">Couldn't load releases: {error || 'unknown'}</p>
+      <div className="border border-border bg-surface rounded p-4">
+        <h2 className="font-medium text-text mb-1">🖥️ Desktop app</h2>
+        <p className="text-xs text-ember">Couldn't load releases: {error || 'unknown'}</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-800/50 backdrop-blur rounded-lg p-6 border border-yellow-500/30">
-      <h2 className="text-xl font-bold text-yellow-300 mb-2">🖥️ Desktop App (admin)</h2>
-      <p className="text-xs text-gray-400 mb-4">
-        Mini downloader for adding YouTube videos to the library. Use this on a
-        residential network — Render's IPs are blocked by YouTube.
+    <div className="border border-border bg-surface rounded p-4">
+      <div className="flex items-baseline justify-between mb-1">
+        <h2 className="font-medium text-text">🖥️ Desktop app</h2>
+        <span className="text-[10px] uppercase tracking-wider text-dim">admin</span>
+      </div>
+      <p className="text-xs text-dim mb-3 leading-snug">
+        Adds YouTube videos to the library. Run on a residential network —
+        Render's IPs are blocked by YouTube.
       </p>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {data.platforms.map((p) => (
           <a
             key={p.os}
             href={p.url}
             target="_blank"
             rel="noreferrer"
-            className="flex items-start justify-between gap-3 bg-gray-700/60 hover:bg-gray-700 rounded p-3 transition border border-gray-600 hover:border-yellow-400"
+            className="flex items-start justify-between gap-2 bg-surface2 hover:bg-surface3 border border-border hover:border-border-strong rounded p-2.5 transition"
           >
-            <span className="flex items-start gap-3 min-w-0">
-              <span className="text-2xl shrink-0">{PLATFORM_ICON[p.os] || '💾'}</span>
+            <span className="flex items-start gap-2 min-w-0">
+              <span className="text-xl shrink-0">{PLATFORM_ICON[p.os] || '💾'}</span>
               <span className="min-w-0">
-                <div className="font-medium text-white">{p.label}</div>
-                <div className="text-xs text-gray-400 truncate">{p.filename}</div>
+                <div className="text-sm font-medium text-text">{p.label}</div>
+                <div className="text-[11px] text-dim font-mono truncate">
+                  {p.filename}
+                </div>
                 {p.note && (
-                  <div className="text-[11px] text-gray-500 mt-1">{p.note}</div>
+                  <div className="text-[11px] text-muted mt-0.5">{p.note}</div>
                 )}
               </span>
             </span>
-            <span className="text-xs text-yellow-300 shrink-0">↓ Download</span>
+            <span className="text-[10px] text-accent shrink-0 mt-0.5">↓</span>
           </a>
         ))}
       </div>
 
-      <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-500">
-        Latest release of <code className="text-gray-300">{data.repo}</code>.
-        First-time setup details:{' '}
+      <div className="mt-3 pt-3 border-t border-border text-[11px] text-muted">
+        Latest release of <code className="text-dim">{data.repo}</code>.{' '}
         <a
           href={`${data.source_url}/blob/main/desktop/README.md`}
           target="_blank"
           rel="noreferrer"
-          className="text-yellow-300 hover:underline"
+          className="text-accent hover:text-accent-strong"
         >
-          desktop/README.md
+          setup notes →
         </a>
       </div>
     </div>
