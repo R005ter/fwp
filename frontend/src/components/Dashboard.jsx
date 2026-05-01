@@ -2,20 +2,22 @@ import React from 'react';
 import { API_BASE, extractVideoId } from '../api.js';
 import AdminDesktopDownload from './AdminDesktopDownload.jsx';
 import ProjectSettings from './ProjectSettings.jsx';
-
-const THEME_KEY = 'fwp_theme';
-const THEMES = ['ember', 'midnight'];
+import ThemeCustomizer from './ThemeCustomizer.jsx';
+import {
+  THEME_PRESETS,
+  loadPreset,
+  loadOverrides,
+  applyTheme,
+  savePreset,
+} from '../theme.js';
 
 const useTheme = () => {
-  const [theme, setTheme] = React.useState(() => {
-    if (typeof window === 'undefined') return 'ember';
-    return localStorage.getItem(THEME_KEY) || 'ember';
-  });
+  const [preset, setPresetState] = React.useState(loadPreset);
   React.useEffect(() => {
-    document.body.setAttribute('data-theme', theme);
-    localStorage.setItem(THEME_KEY, theme);
-  }, [theme]);
-  return [theme, setTheme];
+    applyTheme(preset, loadOverrides());
+    savePreset(preset);
+  }, [preset]);
+  return [preset, setPresetState];
 };
 
 const Dashboard = ({
@@ -34,6 +36,8 @@ const Dashboard = ({
   showToast,
 }) => {
   const [theme, setTheme] = useTheme();
+  const [showThemeMenu, setShowThemeMenu] = React.useState(false);
+  const [showThemeCustomizer, setShowThemeCustomizer] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [youtubeUrl, setYoutubeUrl] = React.useState('');
   const [youtubeSearchQuery, setYoutubeSearchQuery] = React.useState('');
@@ -210,16 +214,57 @@ const Dashboard = ({
 
           <div className="flex-1" />
 
-          {/* Theme toggle */}
-          <button
-            onClick={() =>
-              setTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length])
-            }
-            className="text-xs text-dim hover:text-text px-2 py-1 border border-border rounded transition"
-            title="Switch theme"
-          >
-            {theme === 'ember' ? '🔥 ember' : '🌙 midnight'}
-          </button>
+          {/* Theme picker */}
+          <div className="relative">
+            <button
+              onClick={() => setShowThemeMenu((v) => !v)}
+              className="text-xs text-dim hover:text-text px-2 py-1 border border-border rounded transition flex items-center gap-1"
+              title="Theme"
+            >
+              {THEME_PRESETS.find((p) => p.id === theme)?.icon || '🎨'}{' '}
+              <span>{theme}</span>
+              <span className="text-[10px] opacity-60">▾</span>
+            </button>
+            {showThemeMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowThemeMenu(false)}
+                />
+                <div
+                  className="absolute right-0 top-full mt-1 w-56 bg-surface border border-border rounded elev-2 z-50 overflow-hidden"
+                >
+                  {THEME_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setTheme(p.id);
+                        setShowThemeMenu(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-surface2 transition ${
+                        theme === p.id ? 'bg-accent-soft text-accent' : 'text-text'
+                      }`}
+                    >
+                      <span className="text-base">{p.icon}</span>
+                      <span className="flex-1">{p.label}</span>
+                      {theme === p.id && <span className="text-[10px]">✓</span>}
+                    </button>
+                  ))}
+                  <div className="border-t border-border">
+                    <button
+                      onClick={() => {
+                        setShowThemeCustomizer(true);
+                        setShowThemeMenu(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs text-dim hover:text-text hover:bg-surface2 transition"
+                    >
+                      ⚙ Customize…
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           {/* User badge + logout */}
           <div className="flex items-center gap-3 text-xs">
@@ -477,6 +522,10 @@ const Dashboard = ({
           onProjectChanged={() => window.location.reload()}
           showToast={showToast}
         />
+      )}
+
+      {showThemeCustomizer && (
+        <ThemeCustomizer onClose={() => setShowThemeCustomizer(false)} />
       )}
     </div>
   );
