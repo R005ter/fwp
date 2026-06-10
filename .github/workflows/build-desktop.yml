@@ -120,3 +120,19 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## Install notes
+
+            **macOS** — the app is signed but not Apple-notarized, so a fresh
+            download shows *"fwp-desktop is damaged and can't be opened."* It is
+            **not** damaged — that's just Gatekeeper blocking an un-notarized app.
+            Clear the quarantine flag once, then open normally:
+            ```
+            xattr -dr com.apple.quarantine ~/Downloads/fwp-desktop.app
+            ```
+
+            **Windows** — SmartScreen may warn; click *More info → Run anyway*.
+
+            **Linux** — `sudo apt install ~/Downloads/fwp-desktop-linux.deb`
+
+            ---

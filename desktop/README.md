@@ -11,20 +11,23 @@ Download the binary for your OS from the **🖥️ Desktop App** panel on the da
 | OS | Filename | First-run notes |
 |---|---|---|
 | Windows | `fwp-desktop-windows.exe` | Double-click. SmartScreen may complain — click *More info → Run anyway*. |
-| macOS | `fwp-desktop-mac.zip` | Unzip. Right-click `fwp-desktop.app` → **Open** (Gatekeeper bypass for unsigned apps). After the first open, you can launch normally. |
+| macOS | `fwp-desktop-mac.zip` | Unzip, then clear the quarantine flag — see [macOS first run](#macos-first-run). A plain double-click (or right-click → Open) reports it as *"damaged"* because the app isn't Apple-notarized. |
 | Linux (Mint / Ubuntu / Debian) | `fwp-desktop-linux.deb` | Double-click the `.deb` → Software Installer opens → enter password → installed. The app then appears in your menu under *Multimedia* (or *Sound & Video*). System-installs `python3-gi`, `libwebkit2gtk-4.1-0`, `ffmpeg` automatically. |
 
 ffmpeg is bundled inside the binary — you don't need to install anything else.
 
-### macOS Gatekeeper, the fast way
+### macOS first run
 
-If right-click → Open is annoying, you can also do:
+The app is ad-hoc signed but **not Apple-notarized** (notarization requires a paid Apple Developer account). On a fresh download macOS quarantines it and refuses to launch with *"fwp-desktop is damaged and can't be opened. You should move it to the Trash."* — and right-click → **Open** does **not** get around it. The app isn't actually damaged; this is just Gatekeeper blocking an un-notarized download on Apple Silicon.
+
+Clear the quarantine flag once and it opens normally from then on:
 
 ```bash
-xattr -dr com.apple.quarantine /path/to/fwp-desktop.app
+xattr -dr com.apple.quarantine ~/Downloads/fwp-desktop.app
+open ~/Downloads/fwp-desktop.app
 ```
 
-That clears the quarantine flag so the app opens like any other.
+Tip: type `xattr -dr com.apple.quarantine ` (with a trailing space), then drag `fwp-desktop.app` from Finder into Terminal to fill in the path, and press Enter.
 
 ### Linux Mint specifics
 
