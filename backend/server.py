@@ -7,6 +7,7 @@ import os
 import json
 import subprocess
 import threading
+import time
 import uuid
 import requests
 import re
@@ -17,6 +18,7 @@ from flask import Flask, request, jsonify, send_from_directory, session, redirec
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
+import psycopg2
 from database import (
     init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth, get_db,
     save_show, get_user_shows, get_all_shows_with_creators, delete_show,
@@ -371,12 +373,70 @@ if not FFMPEG_PATH:
 # Track download progress (per user)
 downloads = {}
 
-# Initialize database on startup
-init_db()
-
-# Apply any pending migrations (idempotent — safe to call on every boot).
+# --- Resilient database startup --------------------------------------------
+# init_db() and the migrations both hit the database at import time. A raw call
+# here means an unreachable DB (e.g. a paused Supabase project) crashes gunicorn
+# on boot and takes the WHOLE service down — frontend and health check included.
+# Instead, boot in a degraded mode and self-heal once the DB is back (see
+# _ensure_db_ready below), so a transient DB blip no longer crash-loops.
 from migrations import run_pending_migrations  # noqa: E402
-run_pending_migrations()
+
+DB_READY = False
+_last_db_init_attempt = 0.0
+_DB_INIT_RETRY_INTERVAL = 30.0  # seconds between lazy re-init attempts
+
+
+def _attempt_db_startup():
+    """Run init_db + migrations once; return True on success.
+
+    Both are idempotent, so this is safe to call repeatedly — at boot and as a
+    lazy retry on incoming requests once a downed database recovers.
+    """
+    global DB_READY, _last_db_init_attempt
+    _last_db_init_attempt = time.time()
+    try:
+        init_db()
+        run_pending_migrations()
+        DB_READY = True
+        print("✓ Database initialized")
+    except Exception as e:
+        DB_READY = False
+        print(f"⚠ Database unavailable — booting in degraded mode: {e}")
+    return DB_READY
+
+
+_attempt_db_startup()
+
+
+@app.before_request
+def _ensure_db_ready():
+    """Self-heal the DB connection and fast-fail API calls while it's down.
+
+    Skips static assets and the health check (which must stay DB-independent).
+    When the DB is down, retries init at most every _DB_INIT_RETRY_INTERVAL
+    seconds and otherwise returns a clean 503 immediately — so requests don't
+    each block on a 10s connection timeout.
+    """
+    if DB_READY:
+        return
+    if not request.path.startswith("/api/") or request.path == "/api/health":
+        return
+    if time.time() - _last_db_init_attempt >= _DB_INIT_RETRY_INTERVAL:
+        _attempt_db_startup()
+    if not DB_READY:
+        return jsonify({
+            "error": "The database is temporarily unavailable. Please try again shortly."
+        }), 503
+
+
+@app.errorhandler(psycopg2.OperationalError)
+def _handle_db_unavailable(err):
+    """Safety net: return a clean 503 if the DB drops mid-request, not a 500."""
+    print(f"Database error during request: {err}")
+    return jsonify({
+        "error": "The database is temporarily unavailable. Please try again shortly."
+    }), 503
+
 
 # Project / firework / show routes (post-migration model).
 from routes_projects import bp as projects_bp  # noqa: E402
@@ -1972,8 +2032,13 @@ def health():
     except FileNotFoundError:
         ytdlp_version = None
     
+    # Report DB state from the cached flag (no live connection — keep health
+    # fast and DB-independent so a DB outage doesn't fail the container's
+    # health check). Stays HTTP 200 regardless so Render keeps us alive to
+    # serve the frontend and self-heal.
     return jsonify({
         "status": "ok",
+        "database": "ok" if DB_READY else "unavailable",
         "ytdlp_available": ytdlp_version is not None,
         "ytdlp_version": ytdlp_version
     })
