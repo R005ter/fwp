@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, Response
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from authlib.integrations.flask_client import OAuth
 from database import (
     init_db, create_user, verify_user, get_user_by_id, get_user_by_oauth, get_db,
@@ -36,6 +37,13 @@ load_dotenv()
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
 
 IS_RENDER = os.environ.get('RENDER') == 'true'
+
+# Render terminates TLS at its edge and forwards plain HTTP to the app, with the
+# real scheme/host in X-Forwarded-* headers. Trust them so url_for(_external=True)
+# (and request.url_root) build https:// URLs — otherwise the Google OAuth
+# redirect_uri comes out as http://, which Google rejects and the sign-in fails.
+if IS_RENDER:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 
 def _parse_admin_ids():
