@@ -16,10 +16,8 @@ Usage:
 from __future__ import annotations
 
 import platform
-import shutil
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -74,18 +72,40 @@ def main() -> int:
     if proc.returncode != 0:
         return proc.returncode
 
-    # Mac: zip the .app for distribution.
+    # Mac: ad-hoc sign + zip the .app for distribution.
     if system == "Darwin":
         app_path = DIST / f"{APP_NAME}.app"
         if not app_path.exists():
             print(f"Expected .app not found at {app_path}", file=sys.stderr)
             return 1
+
+        # Re-apply a clean ad-hoc signature. PyInstaller already signs the
+        # bundle, but doing it explicitly guarantees a valid signature right
+        # before packaging. macOS on Apple Silicon refuses to launch a bundle
+        # with an invalid signature, reporting it as "damaged".
+        sign = subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", str(app_path)]
+        )
+        if sign.returncode != 0:
+            print("codesign failed", file=sys.stderr)
+            return sign.returncode
+
         zip_path = DIST / f"{APP_NAME}-mac.zip"
         if zip_path.exists():
             zip_path.unlink()
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in app_path.rglob("*"):
-                zf.write(f, f.relative_to(DIST))
+
+        # Use ditto, not Python's zipfile. zipfile follows symlinks and drops
+        # the executable bit, which corrupts the .app bundle and invalidates
+        # the code signature — the downloaded app then shows as "damaged".
+        # ditto preserves symlinks, permissions, resource forks, and the
+        # signature; --keepParent keeps the fwp-desktop.app/ top level.
+        ditto = subprocess.run(
+            ["ditto", "-c", "-k", "--keepParent", str(app_path), str(zip_path)]
+        )
+        if ditto.returncode != 0:
+            print("ditto packaging failed", file=sys.stderr)
+            return ditto.returncode
+
         print(f"✓ {zip_path} ({zip_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
     return 0
